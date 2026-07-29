@@ -73,6 +73,13 @@ namespace dnaorbit::dsp
         double thetaB = orbitmath::pi;
         bool   symmetryLocked = true;
 
+        // Fixed-duration linear resync ramp used when Symmetry returns to 100%
+        // (see process()). Bounded and deterministic, unlike an exponential
+        // tail, so it reliably completes within resyncDurationSeconds.
+        double resyncStartError = 0.0;
+        int    resyncSamplesRemaining = 0;
+        int    resyncSamplesTotal = 1;
+
         // Smoothed parameters.
         juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> radiusSmoothed;
         juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> depthSmoothed;
@@ -99,8 +106,7 @@ namespace dnaorbit::dsp
         static constexpr float maxBackDelayMs    = 8.0f;
         static constexpr double maxRateDifference = 0.03;
         static constexpr double symmetryLockThreshold = 0.999;
-        static constexpr double resyncTimeConstantSeconds = 0.15;
-        static constexpr double resyncEpsilonRadians = 1.0e-4;
+        static constexpr double resyncDurationSeconds = 0.2; // within the 100-300ms spec window
 
         // Published for the UI thread; written once per block.
         std::atomic<float> uiThetaA { 0.0f };

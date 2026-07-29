@@ -31,6 +31,8 @@ namespace dnaorbit::dsp
         delayA.prepare (spec);
         delayB.prepare (spec);
 
+        resyncSamplesTotal = juce::jmax (1, (int) std::round (resyncDurationSeconds * sampleRate));
+
         reset();
     }
 
@@ -39,6 +41,8 @@ namespace dnaorbit::dsp
         thetaA = 0.0;
         thetaB = orbitmath::pi;
         symmetryLocked = true;
+        resyncStartError = 0.0;
+        resyncSamplesRemaining = 0;
 
         lowPassA.reset();
         lowPassB.reset();
@@ -120,11 +124,24 @@ namespace dnaorbit::dsp
                 }
                 else
                 {
-                    const double error = orbitmath::shortestAngleDelta (thetaB, desired);
-                    const double alpha = 1.0 - std::exp (-1.0 / (resyncTimeConstantSeconds * sampleRate));
-                    thetaB = orbitmath::wrapTwoPi (thetaB + error * alpha);
+                    // Just transitioned from drifting to locked: capture the
+                    // current error once and ramp it to zero linearly over a
+                    // fixed, bounded duration (resyncSamplesTotal), so the
+                    // resync reliably completes within the target window
+                    // instead of trailing off exponentially forever.
+                    if (resyncSamplesRemaining <= 0)
+                    {
+                        resyncStartError = orbitmath::shortestAngleDelta (thetaB, desired);
+                        resyncSamplesRemaining = resyncSamplesTotal;
+                    }
 
-                    if (std::abs (orbitmath::shortestAngleDelta (thetaB, desired)) < resyncEpsilonRadians)
+                    // shortestAngleDelta(thetaB, desired) == desired - thetaB (shortest path), so
+                    // thetaB == desired - resyncStartError reproduces the original thetaB at fraction 1.
+                    const double fraction = (double) resyncSamplesRemaining / (double) resyncSamplesTotal;
+                    thetaB = orbitmath::wrapTwoPi (desired - resyncStartError * fraction);
+                    --resyncSamplesRemaining;
+
+                    if (resyncSamplesRemaining <= 0)
                     {
                         thetaB = desired;
                         symmetryLocked = true;
@@ -134,6 +151,7 @@ namespace dnaorbit::dsp
             else
             {
                 symmetryLocked = false;
+                resyncSamplesRemaining = 0; // force a fresh error capture next time we relock
                 const double diff = orbitmath::rateDifferenceFactor ((double) symmetry, maxRateDifference);
                 const double incB = orbitmath::angularIncrement ((double) rateHzTarget * (1.0 + diff), sampleRate);
                 thetaB = orbitmath::wrapTwoPi (thetaB + incB);

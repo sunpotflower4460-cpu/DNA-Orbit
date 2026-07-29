@@ -175,6 +175,70 @@ namespace
                                  "Centroid must remain locked at Symmetry 100% over a long run");
             }
 
+            beginTest ("Returning Symmetry to 100% resyncs the centroid within ~300ms, with no angle jump");
+            {
+                HelixEngine engine;
+                const double sr = 48000.0;
+                const int blockSize = 32;
+                engine.prepare (sr, blockSize, 2);
+
+                // Drift B away from the ideal 180 degrees for a while at Symmetry 0%.
+                HelixEngine::Parameters drifting;
+                drifting.symmetry01 = 0.0f;
+                drifting.rateHz = 1.0f;
+                engine.setParameters (drifting);
+
+                juce::AudioBuffer<float> buffer (2, blockSize);
+
+                for (int i = 0; i < (int) (sr * 3.0) / blockSize; ++i)
+                {
+                    fillTestSignal (buffer, sr);
+                    engine.process (buffer, 2);
+                }
+
+                const float centroidBeforeResync = engine.getVisualState().centroidDistance;
+                expectGreaterThan (centroidBeforeResync, 0.02f, "Symmetry 0% must have visibly drifted the centroid before we test resync");
+
+                // Now ask for full symmetry again and track how long it takes to
+                // relock, watching for any single-sample angle discontinuity.
+                HelixEngine::Parameters locked;
+                locked.symmetry01 = 1.0f;
+                locked.rateHz = 1.0f;
+                engine.setParameters (locked);
+
+                double prevThetaBAfterSwitch = engine.getVisualState().thetaB;
+                bool sawJump = false;
+                int samplesToRelock = -1;
+                const int maxSamplesToCheck = (int) (sr * 1.0); // generous outer bound
+                int samplesChecked = 0;
+
+                while (samplesChecked < maxSamplesToCheck)
+                {
+                    fillTestSignal (buffer, sr);
+                    engine.process (buffer, 2);
+                    samplesChecked += blockSize;
+
+                    const auto state = engine.getVisualState();
+
+                    // thetaB should never leap by more than a small fraction of a
+                    // radian between consecutive polls (one block apart here).
+                    const double jump = std::abs (dnaorbit::orbitmath::shortestAngleDelta (prevThetaBAfterSwitch, (double) state.thetaB));
+                    const double maxExpectedPerBlock = dnaorbit::orbitmath::angularIncrement (4.0, sr) * blockSize * 4.0; // generous margin over the fastest orbit rate
+                    if (jump > maxExpectedPerBlock)
+                        sawJump = true;
+                    prevThetaBAfterSwitch = state.thetaB;
+
+                    if (samplesToRelock < 0 && state.centroidDistance < 0.01f)
+                        samplesToRelock = samplesChecked;
+                }
+
+                expect (! sawJump, "thetaB must never leap discontinuously while resyncing");
+                expect (samplesToRelock > 0, "The centroid must relock within the outer bound");
+
+                const double relockSeconds = (double) samplesToRelock / sr;
+                expectLessThan (relockSeconds, 0.35, "Resync should complete within roughly the 100-300ms spec window");
+            }
+
             beginTest ("Parameter automation does not produce large sample-to-sample discontinuities");
             {
                 HelixEngine engine;
