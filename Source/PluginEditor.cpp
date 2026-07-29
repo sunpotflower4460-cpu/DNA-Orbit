@@ -46,8 +46,12 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
     nullCoreWarningLabel.setFont (juce::FontOptions (12.0f, juce::Font::bold));
     nullCoreWarningLabel.setColour (juce::Label::textColourId, dnaorbit::ui::DnaLookAndFeel::warningColour());
     nullCoreWarningLabel.setJustificationType (juce::Justification::centredLeft);
-    nullCoreWarningLabel.setVisible (nullCoreButton.getToggleState());
     addAndMakeVisible (nullCoreWarningLabel);
+    // addAndMakeVisible() unconditionally makes its child visible, so the
+    // explicit setVisible() call reflecting the actual parameter state must
+    // come after it, not before - otherwise it gets clobbered and the
+    // warning shows even when Null Core defaults to off.
+    nullCoreWarningLabel.setVisible (processorRef.apvts.getRawParameterValue (dnaorbit::params::nullCoreID)->load() > 0.5f);
     nullCoreButton.addListener (this);
 
     setResizable (true, true);
