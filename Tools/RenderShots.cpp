@@ -50,7 +50,8 @@ namespace
         if (auto* nullCore = processor.apvts.getParameter (dnaorbit::params::nullCoreID))
             nullCore->setValueNotifyingHost (scenario.nullCore ? 1.0f : 0.0f);
 
-        processor.apvts.state.setProperty ("editorPage", scenario.page, nullptr);
+        processor.apvts.state.getOrCreateChildWithName (dnaorbit::params::uiStateNodeID, nullptr)
+            .setProperty (dnaorbit::params::editorPagePropertyID, scenario.page, nullptr);
 
         std::unique_ptr<juce::AudioProcessorEditor> editor { processor.createEditor() };
         editor->setSize (900, 620);

@@ -121,8 +121,16 @@ safely to the free-running Rate knob rather than guessing a tempo.
 
 ### Presets
 
-Selectable from the プリセット menu in the 基本 tab. They set the parameters
-directly; the values are then saved with the project like any other setting.
+Selectable from the プリセット menu in the 基本 tab. Defined in
+`Source/Presets.h` (GUI-independent, unit-tested) as a point in the full
+12-parameter space — Sync, Division, Output and Auto Gain are set
+explicitly by every preset (Sync off, Division 1 bar, Output 0 dB, Auto Gain
+on, unless noted below), so choosing a preset is deterministic: the result
+never depends on what was set before. The values are then saved with the
+project like any other setting.
+
+Once you nudge anything after picking a preset, a 元に戻す (Revert) button
+appears next to the menu to snap back to the preset's exact values.
 
 | Preset | Rate | Radius | Depth | Symmetry | Twist | Core | Mix | Null Core |
 |---|---|---|---|---|---|---|---|---|
@@ -260,7 +268,14 @@ built-in `UnitTest` framework:
   CORE off does *not* cancel in mono, mono-in/stereo-out path.
 - **State** — full parameter round-trip through `getStateInformation` /
   `setStateInformation`, crash-safety against null/garbage/empty state data,
-  bus-layout support/rejection, bypass pass-through.
+  bus-layout support/rejection, bypass pass-through (including the oversized-
+  block fallback), bypass keeping the engine's orbit phase advancing instead
+  of freezing it, state schema versioning, and migrating a pre-Phase-1
+  project's flat editor-state properties into their own `uiState` node.
+- **Presets** — every factory preset sets all 12 parameters the same way
+  regardless of prior state (determinism), the Modified indicator matching
+  right after applying a preset and going false once nudged, and Revert
+  (re-apply) restoring the matched state.
 - **LevelMatch** — the 81-point Auto Gain sweep described above, Auto Gain
   off restoring the raw level, the correlation meter against known
   mono/inverted signals, and the RMS meter returning to zero on silence.

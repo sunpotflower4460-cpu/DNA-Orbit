@@ -301,6 +301,113 @@ namespace
                             "A state with no version attribute predates versioning, which is schema 1 by definition");
                 }
             }
+
+            beginTest ("Bypass keeps the engine's orbit phase advancing instead of freezing it");
+            {
+                DNAOrbitAudioProcessor processor;
+                processor.prepareToPlay (48000.0, 256);
+
+                juce::AudioBuffer<float> buffer (2, 256);
+                buffer.clear();
+                juce::MidiBuffer midi;
+
+                processor.processBlockBypassed (buffer, midi);
+                const float thetaAfterFirst = processor.getEngine().getVisualState().thetaA;
+
+                processor.processBlockBypassed (buffer, midi);
+                const float thetaAfterSecond = processor.getEngine().getVisualState().thetaA;
+
+                expect (std::abs (thetaAfterSecond - thetaAfterFirst) > 1.0e-5f,
+                        "Orbit phase must keep advancing across bypassed blocks, not freeze at its pre-bypass value");
+
+                processor.releaseResources();
+            }
+
+            beginTest ("Bypass with a block larger than prepareToPlay negotiated falls back safely, still dry");
+            {
+                // A host handing us a bigger block than it negotiated is a
+                // contract violation, but the fallback (skip the state
+                // advance, keep the dry passthrough) must never crash or
+                // touch the audible signal.
+                DNAOrbitAudioProcessor processor;
+                processor.prepareToPlay (48000.0, 256);
+
+                juce::AudioBuffer<float> buffer (2, 512);
+                for (int ch = 0; ch < 2; ++ch)
+                {
+                    auto* data = buffer.getWritePointer (ch);
+                    for (int n = 0; n < 512; ++n)
+                        data[n] = 0.4f * (float) std::sin (juce::MathConstants<double>::twoPi * 220.0 * n / 48000.0);
+                }
+
+                juce::AudioBuffer<float> original;
+                original.makeCopyOf (buffer);
+
+                juce::MidiBuffer midi;
+                processor.processBlockBypassed (buffer, midi);
+
+                for (int ch = 0; ch < 2; ++ch)
+                    for (int n = 0; n < 512; ++n)
+                        expectWithinAbsoluteError (buffer.getSample (ch, n), original.getSample (ch, n), 1.0e-6f);
+
+                processor.releaseResources();
+            }
+
+            beginTest ("A pre-Phase-1 save with flat editorPage/Width/Height properties migrates into the uiState child node");
+            {
+                // Every project saved before editor state got its own child
+                // node has these three directly on the root - simulate that
+                // exact shape rather than assuming today's getStateInformation
+                // already writes the new layout.
+                DNAOrbitAudioProcessor processorA;
+                juce::MemoryBlock savedState;
+                processorA.getStateInformation (savedState);
+
+                std::unique_ptr<juce::XmlElement> xml (juce::AudioProcessor::getXmlFromBinary (
+                    savedState.getData(), (int) savedState.getSize()));
+                expect (xml != nullptr);
+
+                if (xml != nullptr)
+                {
+                    xml->setAttribute ("editorPage", 1);
+                    xml->setAttribute ("editorWidth", 1234);
+                    xml->setAttribute ("editorHeight", 789);
+
+                    juce::MemoryBlock legacyState;
+                    juce::AudioProcessor::copyXmlToBinary (*xml, legacyState);
+
+                    DNAOrbitAudioProcessor processorB;
+                    processorB.setStateInformation (legacyState.getData(), (int) legacyState.getSize());
+
+                    expect (! processorB.apvts.state.hasProperty ("editorPage"),
+                            "Legacy flat editorPage must be removed from the root after migration");
+                    expect (! processorB.apvts.state.hasProperty ("editorWidth"),
+                            "Legacy flat editorWidth must be removed from the root after migration");
+                    expect (! processorB.apvts.state.hasProperty ("editorHeight"),
+                            "Legacy flat editorHeight must be removed from the root after migration");
+
+                    auto uiState = processorB.apvts.state.getChildWithName ("uiState");
+                    expect (uiState.isValid(), "Migration must create the uiState child node");
+                    expect ((int) uiState.getProperty ("editorPage", -1) == 1,
+                            "editorPage must survive the migration with its saved value");
+                    expect ((int) uiState.getProperty ("editorWidth", -1) == 1234,
+                            "editorWidth must survive the migration with its saved value");
+                    expect ((int) uiState.getProperty ("editorHeight", -1) == 789,
+                            "editorHeight must survive the migration with its saved value");
+                }
+            }
+
+            beginTest ("A save with no legacy UI properties at all still gets a uiState node without crashing");
+            {
+                DNAOrbitAudioProcessor processorA;
+                juce::MemoryBlock savedState;
+                processorA.getStateInformation (savedState);
+
+                DNAOrbitAudioProcessor processorB;
+                processorB.setStateInformation (savedState.getData(), (int) savedState.getSize());
+
+                expect (processorB.apvts.state.getChildWithName ("uiState").isValid());
+            }
         }
     };
 

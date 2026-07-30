@@ -38,6 +38,19 @@ namespace dnaorbit::params
     inline constexpr const char* schemaVersionPropertyID = "dnaOrbitSchemaVersion";
     inline constexpr int currentStateSchemaVersion = 1;
 
+    /**
+     * Editor-only state (which tab is showing, window size) lives in its own
+     * child node under apvts.state rather than as flat root properties, so it
+     * stays clearly separate from anything that affects the sound. Every
+     * project saved before this existed has these three as flat root
+     * properties instead - see PluginProcessor::setStateInformation for the
+     * one-time migration that moves them into this node.
+     */
+    inline constexpr const char* uiStateNodeID        = "uiState";
+    inline constexpr const char* editorPagePropertyID   = "editorPage";
+    inline constexpr const char* editorWidthPropertyID  = "editorWidth";
+    inline constexpr const char* editorHeightPropertyID = "editorHeight";
+
     inline constexpr float rateMinHz = 0.02f;
     inline constexpr float rateMaxHz = 4.0f;
     inline constexpr float rateDefaultHz = 0.12f;

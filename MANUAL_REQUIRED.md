@@ -69,6 +69,15 @@ real vocal/pad/guitar material. Nothing here substitutes automated DSP tests
 (which do run, and do check the numeric claims — e.g. anti-phase no longer
 silencing Wet, Mix-sweep RMS deviation bounds) for actually listening.
 
+- **Bypass toggle audibility** (see `docs/commercial-upgrade/decisions/ADR-001-bypass-continuity.md`):
+  Phase 1 fixed the engine's internal state freezing during bypass (orbit
+  phase, filters, and smoothers now keep advancing on a scratch buffer), but
+  deliberately did NOT add a Soft Bypass audio crossfade — that was a
+  documented, reasoned trade-off, not an oversight. If a real DAW listening
+  session finds an audible click/discontinuity when toggling Host Bypass,
+  that is the one thing to specifically check for; ADR-001 already lists the
+  crossfade as the fallback design if this turns out to be needed.
+
 ## Signing, notarization, installers
 
 - macOS: Developer ID Application signing, Hardened Runtime, notarization

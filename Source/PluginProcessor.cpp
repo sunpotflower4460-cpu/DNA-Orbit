@@ -1,6 +1,35 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+namespace
+{
+    /**
+     * Every project saved before editor state got its own child node (see
+     * params::uiStateNodeID) has editorPage/editorWidth/editorHeight as flat
+     * properties directly on the root state. Move them into the child node so
+     * an existing user's window size and tab selection still restore
+     * correctly under the new layout, then drop the old root copies so
+     * nothing reads two conflicting sources of truth going forward.
+     */
+    void migrateLegacyUiState (juce::ValueTree& root)
+    {
+        using namespace dnaorbit::params;
+
+        auto uiState = root.getOrCreateChildWithName (uiStateNodeID, nullptr);
+
+        for (const auto* legacyID : { editorPagePropertyID, editorWidthPropertyID, editorHeightPropertyID })
+        {
+            if (root.hasProperty (legacyID))
+            {
+                if (! uiState.hasProperty (legacyID))
+                    uiState.setProperty (legacyID, root.getProperty (legacyID), nullptr);
+
+                root.removeProperty (legacyID, nullptr);
+            }
+        }
+    }
+}
+
 DNAOrbitAudioProcessor::DNAOrbitAudioProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
@@ -24,6 +53,7 @@ DNAOrbitAudioProcessor::DNAOrbitAudioProcessor()
 void DNAOrbitAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     engine.prepare (sampleRate, samplesPerBlock, getTotalNumOutputChannels());
+    bypassScratchBuffer.setSize (2, samplesPerBlock, false, false, true);
 
     // Without this, every SmoothedValue starts this session at its default
     // current value of 0 and only reaches the host's actual settings by
@@ -115,12 +145,36 @@ void DNAOrbitAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& buf
 {
     const int totalNumInputChannels  = getTotalNumInputChannels();
     const int totalNumOutputChannels = getTotalNumOutputChannels();
+    const int numSamples = buffer.getNumSamples();
+
+    // Keep the engine's internal state (orbit phase, smoothers, filter/delay
+    // state, and the atomics the 3D visualiser reads) advancing while
+    // bypassed, instead of freezing it. Without this, un-bypassing resumes
+    // from a stale phase - a jump the host's own bypass toggle can make
+    // audible - and the helix view appears to simply stop while bypassed.
+    // This runs the real DSP on a scratch copy so the actual output stays an
+    // exact dry passthrough; only bypassScratchBuffer is written here.
+    //
+    // bypassScratchBuffer is sized once in prepareToPlay() and never resized
+    // on the audio thread. If a host ever hands us a block larger than it
+    // negotiated (a contract violation, but hosts do have bugs), skip the
+    // state advance rather than risk an audio-thread allocation - the dry
+    // passthrough below is unaffected either way.
+    if (numSamples <= bypassScratchBuffer.getNumSamples())
+    {
+        for (int ch = 0; ch < 2; ++ch)
+            bypassScratchBuffer.copyFrom (ch, 0, buffer, juce::jmin (ch, totalNumInputChannels - 1), 0, numSamples);
+
+        juce::AudioBuffer<float> scratchView (bypassScratchBuffer.getArrayOfWritePointers(), 2, numSamples);
+        engine.setParameters (currentParameterSnapshot());
+        engine.process (scratchView, totalNumInputChannels);
+    }
 
     // For mono-in/stereo-out, duplicate the input so bypass still yields a
     // sensible stereo signal that matches the input. Stereo-in/stereo-out is
     // already an untouched pass-through.
     for (int ch = totalNumInputChannels; ch < totalNumOutputChannels; ++ch)
-        buffer.copyFrom (ch, 0, buffer, 0, 0, buffer.getNumSamples());
+        buffer.copyFrom (ch, 0, buffer, 0, 0, numSamples);
 }
 
 juce::AudioProcessorEditor* DNAOrbitAudioProcessor::createEditor()
@@ -156,6 +210,7 @@ void DNAOrbitAudioProcessor::setStateInformation (const void* data, int sizeInBy
                                                       dnaorbit::params::currentStateSchemaVersion);
 
     apvts.replaceState (juce::ValueTree::fromXml (*xmlState));
+    migrateLegacyUiState (apvts.state);
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

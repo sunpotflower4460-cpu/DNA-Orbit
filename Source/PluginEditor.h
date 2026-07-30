@@ -36,6 +36,9 @@ private:
     void applyPreset (int presetIndex);
     void timerCallback() override;
 
+    /** Child ValueTree holding editor-only state (tab, window size); see Parameters.h. */
+    juce::ValueTree uiStateTree() const;
+
     /** Prefers a real Japanese font: fontconfig's default for ja can be a Chinese face. */
     static juce::Font japaneseFont (float height, bool bold = false);
 
@@ -54,6 +57,13 @@ private:
 
     juce::ComboBox presetBox;
     juce::Label presetLabel;
+    juce::TextButton revertButton;
+
+    // Tracks which factory preset (if any) is active, so the UI can show a
+    // "Modified" state once the user nudges anything and offer Revert.
+    // -1 means "no preset selected" (e.g. a project saved before this preset
+    // was picked, or one loaded from a DAW project rather than chosen here).
+    int currentPresetIndex = -1;
 
     // Basic page.
     Knob rateKnob, radiusKnob, depthKnob, mixKnob;

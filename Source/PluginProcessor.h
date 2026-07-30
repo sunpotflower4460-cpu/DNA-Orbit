@@ -56,6 +56,14 @@ public:
 private:
     dnaorbit::dsp::HelixEngine engine;
 
+    /**
+     * Scratch space for processBlockBypassed(): sized once in prepareToPlay()
+     * so the audio thread never allocates. Lets the engine's internal state
+     * (orbit phase, smoothers, filters) keep advancing while bypassed without
+     * touching the audible dry passthrough - see processBlockBypassed().
+     */
+    juce::AudioBuffer<float> bypassScratchBuffer;
+
     std::atomic<float>* rateHzParam     = nullptr;
     std::atomic<float>* syncParam       = nullptr;
     std::atomic<float>* divisionParam   = nullptr;
