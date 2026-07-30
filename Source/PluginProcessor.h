@@ -60,6 +60,7 @@ private:
     std::atomic<float>* autoGainParam   = nullptr;
 
     float resolveRateHz() const noexcept;
+    dnaorbit::dsp::HelixEngine::Parameters currentParameterSnapshot() const noexcept;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DNAOrbitAudioProcessor)
 };

@@ -101,33 +101,45 @@ namespace dnaorbit::ui
          */
         static Bounds computeBounds() noexcept
         {
-            Bounds b;
-            bool first = true;
+            // Every input here (scaleX/Y/Z, tiltRadians, cameraDistance,
+            // focalLength) is a compile-time constant, so this result never
+            // changes - but depth01() calls this ~300+ times per frame from
+            // buildFrameGeometry()/paint(), which was recomputing the full
+            // 8-corner projection from scratch every single time. Caching it
+            // turns that into a one-time computation plus a cheap struct copy,
+            // and was very likely the dominant cost behind the adaptive-quality
+            // system needing to downgrade at all.
+            static const Bounds cached = [] {
+                Bounds b;
+                bool first = true;
 
-            for (int i = 0; i < 8; ++i)
-            {
-                const double wx = (i & 1) ? 1.0 : -1.0;
-                const double wy = (i & 2) ? 1.0 : -1.0;
-                const double wz = (i & 4) ? 1.0 : -1.0;
-                const auto p = project (wx, wy, wz);
-
-                if (first)
+                for (int i = 0; i < 8; ++i)
                 {
-                    b.minX = b.maxX = p.x;
-                    b.minY = b.maxY = p.y;
-                    b.minViewZ = b.maxViewZ = p.viewZ;
-                    first = false;
-                }
-                else
-                {
-                    b.minX = std::min (b.minX, p.x); b.maxX = std::max (b.maxX, p.x);
-                    b.minY = std::min (b.minY, p.y); b.maxY = std::max (b.maxY, p.y);
-                    b.minViewZ = std::min (b.minViewZ, p.viewZ);
-                    b.maxViewZ = std::max (b.maxViewZ, p.viewZ);
-                }
-            }
+                    const double wx = (i & 1) ? 1.0 : -1.0;
+                    const double wy = (i & 2) ? 1.0 : -1.0;
+                    const double wz = (i & 4) ? 1.0 : -1.0;
+                    const auto p = project (wx, wy, wz);
 
-            return b;
+                    if (first)
+                    {
+                        b.minX = b.maxX = p.x;
+                        b.minY = b.maxY = p.y;
+                        b.minViewZ = b.maxViewZ = p.viewZ;
+                        first = false;
+                    }
+                    else
+                    {
+                        b.minX = std::min (b.minX, p.x); b.maxX = std::max (b.maxX, p.x);
+                        b.minY = std::min (b.minY, p.y); b.maxY = std::max (b.maxY, p.y);
+                        b.minViewZ = std::min (b.minViewZ, p.viewZ);
+                        b.maxViewZ = std::max (b.maxViewZ, p.viewZ);
+                    }
+                }
+
+                return b;
+            }();
+
+            return cached;
         }
 
         /** Maps a projected point into component pixels. */

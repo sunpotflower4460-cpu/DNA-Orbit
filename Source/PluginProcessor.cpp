@@ -24,6 +24,14 @@ DNAOrbitAudioProcessor::DNAOrbitAudioProcessor()
 void DNAOrbitAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     engine.prepare (sampleRate, samplesPerBlock, getTotalNumOutputChannels());
+
+    // Without this, every SmoothedValue starts this session at its default
+    // current value of 0 and only reaches the host's actual settings by
+    // ramping toward them once processBlock() calls setParameters() - so
+    // Output, Mix, and everything else would audibly fade in from silence
+    // over the first smoothing window after every prepareToPlay() (plugin
+    // load, sample-rate or buffer-size change).
+    engine.primeParameters (currentParameterSnapshot());
 }
 
 void DNAOrbitAudioProcessor::releaseResources()
@@ -71,16 +79,8 @@ float DNAOrbitAudioProcessor::resolveRateHz() const noexcept
     return freeRateHz;
 }
 
-void DNAOrbitAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+dnaorbit::dsp::HelixEngine::Parameters DNAOrbitAudioProcessor::currentParameterSnapshot() const noexcept
 {
-    juce::ScopedNoDenormals noDenormals;
-
-    const int totalNumInputChannels  = getTotalNumInputChannels();
-    const int totalNumOutputChannels = getTotalNumOutputChannels();
-
-    for (int ch = totalNumInputChannels; ch < totalNumOutputChannels; ++ch)
-        buffer.clear (ch, 0, buffer.getNumSamples());
-
     dnaorbit::dsp::HelixEngine::Parameters p;
     p.rateHz     = resolveRateHz();
     p.radius01   = radiusParam->load()   / 100.0f;
@@ -92,6 +92,20 @@ void DNAOrbitAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     p.mix01      = mixParam->load()      / 100.0f;
     p.outputDb   = outputParam->load();
     p.autoGain   = autoGainParam->load() > 0.5f;
+    return p;
+}
+
+void DNAOrbitAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+{
+    juce::ScopedNoDenormals noDenormals;
+
+    const int totalNumInputChannels  = getTotalNumInputChannels();
+    const int totalNumOutputChannels = getTotalNumOutputChannels();
+
+    for (int ch = totalNumInputChannels; ch < totalNumOutputChannels; ++ch)
+        buffer.clear (ch, 0, buffer.getNumSamples());
+
+    const auto p = currentParameterSnapshot();
 
     engine.setParameters (p);
     engine.process (buffer, totalNumInputChannels);

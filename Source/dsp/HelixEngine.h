@@ -41,14 +41,30 @@ namespace dnaorbit::dsp
         void prepare (double newSampleRate, int maximumBlockSize, int maxChannelsHint);
         void reset();
 
-        /** Call once per block before process(). */
+        /** Call once per block before process(). Ramps smoothly toward newParams. */
         void setParameters (const Parameters& newParams) noexcept;
+
+        /**
+         * Call once, right after prepare(), with the current parameter snapshot.
+         * Unlike setParameters(), this snaps every smoothed value immediately
+         * instead of ramping - otherwise every parameter would audibly fade in
+         * from its SmoothedValue default (0) over the first smoothing window
+         * after every prepare() call.
+         */
+        void primeParameters (const Parameters& newParams) noexcept;
 
         /**
          * Processes buffer in place. `buffer` must contain exactly 2 channels;
          * the first `numInputChannels` channels hold valid input data (1 for
          * mono-in, 2 for stereo-in) and any remaining channels are assumed to
          * already be cleared by the caller.
+         *
+         * If called before prepare() (a host contract violation, but hosts do
+         * have bugs), this is a safe no-op rather than touching the delay
+         * lines: juce::dsp::DelayLine's internal buffer has zero channels
+         * until prepare() sizes it, and AudioBuffer::setSample's bounds check
+         * is assertion-only, so writing to channel 0 of a zero-channel buffer
+         * would dereference an invalid pointer in a Release build.
          */
         void process (juce::AudioBuffer<float>& buffer, int numInputChannels) noexcept;
 
@@ -87,7 +103,10 @@ namespace dnaorbit::dsp
         VisualState getVisualState() const noexcept;
 
     private:
+        void applyParameters (const Parameters& p, bool snapImmediately) noexcept;
+
         double sampleRate = 44100.0;
+        bool   isPrepared = false;
 
         // Orbit state (double precision to avoid long-run drift).
         double thetaA = 0.0;
@@ -152,6 +171,14 @@ namespace dnaorbit::dsp
         std::atomic<float> uiCorrelation { 1.0f };
         std::atomic<double> uiPhaseA { 0.0 };
         std::atomic<float> uiPhi { (float) orbitmath::pi };
+
+        // std::atomic<double> is not guaranteed lock-free by the standard; on a
+        // target without native 8-byte atomics it would silently fall back to a
+        // lock, breaking the audio thread's no-locking guarantee. True on every
+        // platform this plugin currently ships for (x86-64, ARM64); fails loudly
+        // at compile time rather than silently at runtime if that ever changes.
+        static_assert (std::atomic<double>::is_always_lock_free,
+                       "uiPhaseA must be lock-free on every platform this plugin ships for");
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HelixEngine)
     };

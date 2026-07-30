@@ -35,6 +35,7 @@ namespace dnaorbit::dsp
 
         resyncSamplesTotal = juce::jmax (1, (int) std::round (resyncDurationSeconds * sampleRate));
 
+        isPrepared = true;
         reset();
     }
 
@@ -74,27 +75,94 @@ namespace dnaorbit::dsp
         uiPhi.store ((float) orbitmath::pi, std::memory_order_relaxed);
     }
 
+    namespace
+    {
+        /**
+         * Falls back to a safe default for any non-finite value. A host that
+         * ever automates a parameter to NaN/Inf (malformed automation data, a
+         * buggy upstream plugin corrupting shared state, etc.) would otherwise
+         * latch thetaA/thetaB - which depend only on rateHz, not audio - to
+         * NaN permanently, since nothing else in the engine would ever
+         * overwrite them back to a finite value.
+         */
+        float sanitizeParam (float value, float fallback) noexcept
+        {
+            return std::isfinite (value) ? value : fallback;
+        }
+    }
+
     void HelixEngine::setParameters (const Parameters& p) noexcept
     {
+        applyParameters (p, false);
+    }
+
+    void HelixEngine::primeParameters (const Parameters& p) noexcept
+    {
+        applyParameters (p, true);
+    }
+
+    void HelixEngine::applyParameters (const Parameters& p, bool snapImmediately) noexcept
+    {
+        const float rateHz     = sanitizeParam (p.rateHz, 0.12f);
+        const float radius01   = sanitizeParam (p.radius01, 0.8f);
+        const float depth01    = sanitizeParam (p.depth01, 0.55f);
+        const float symmetry01 = sanitizeParam (p.symmetry01, 1.0f);
+        const float twistMs    = sanitizeParam (p.twistMs, 5.0f);
+        const float core01     = sanitizeParam (p.core01, 0.0f);
+        const float mix01      = sanitizeParam (p.mix01, 0.35f);
+        const float outputDb   = sanitizeParam (p.outputDb, 0.0f);
+
         nullCoreTarget = p.nullCore;
 
-        rateHzSmoothed.setTargetValue (p.rateHz);
-        autoGainAmountSmoothed.setTargetValue (p.autoGain ? 1.0f : 0.0f);
+        const float autoGainAmount = p.autoGain ? 1.0f : 0.0f;
+        const float nullCoreAmount = p.nullCore ? 1.0f : 0.0f;
+        const float outputGain = dbToGain (outputDb);
 
-        radiusSmoothed.setTargetValue (p.radius01);
-        depthSmoothed.setTargetValue (p.depth01);
-        symmetrySmoothed.setTargetValue (p.symmetry01);
-        twistSmoothed.setTargetValue (p.twistMs);
-        coreSmoothed.setTargetValue (p.core01);
-        mixSmoothed.setTargetValue (p.mix01);
-        outputGainSmoothed.setTargetValue (dbToGain (p.outputDb));
-        nullCoreMixSmoothed.setTargetValue (p.nullCore ? 1.0f : 0.0f);
+        if (snapImmediately)
+        {
+            // Called once right after prepare(): every SmoothedValue defaults to
+            // a current value of 0, so without this every parameter - including
+            // Output and Mix - would audibly ramp in from silence over the
+            // first 50-120ms after every prepareToPlay() (plugin load, sample
+            // rate change), regardless of what the host had them set to.
+            rateHzSmoothed.setCurrentAndTargetValue (rateHz);
+            autoGainAmountSmoothed.setCurrentAndTargetValue (autoGainAmount);
+            radiusSmoothed.setCurrentAndTargetValue (radius01);
+            depthSmoothed.setCurrentAndTargetValue (depth01);
+            symmetrySmoothed.setCurrentAndTargetValue (symmetry01);
+            twistSmoothed.setCurrentAndTargetValue (twistMs);
+            coreSmoothed.setCurrentAndTargetValue (core01);
+            mixSmoothed.setCurrentAndTargetValue (mix01);
+            outputGainSmoothed.setCurrentAndTargetValue (outputGain);
+            nullCoreMixSmoothed.setCurrentAndTargetValue (nullCoreAmount);
+        }
+        else
+        {
+            rateHzSmoothed.setTargetValue (rateHz);
+            autoGainAmountSmoothed.setTargetValue (autoGainAmount);
+            radiusSmoothed.setTargetValue (radius01);
+            depthSmoothed.setTargetValue (depth01);
+            symmetrySmoothed.setTargetValue (symmetry01);
+            twistSmoothed.setTargetValue (twistMs);
+            coreSmoothed.setTargetValue (core01);
+            mixSmoothed.setTargetValue (mix01);
+            outputGainSmoothed.setTargetValue (outputGain);
+            nullCoreMixSmoothed.setTargetValue (nullCoreAmount);
+        }
 
         uiNullCoreOn.store (p.nullCore, std::memory_order_relaxed);
     }
 
     void HelixEngine::process (juce::AudioBuffer<float>& buffer, int numInputChannels) noexcept
     {
+        // A host that violates the prepare-before-process contract would
+        // otherwise hit the delay lines' zero-channel internal buffer - see the
+        // comment on process() in the header. Leaving the buffer untouched
+        // here behaves like a pass-through, which is a safe fallback for a
+        // situation that should never occur in the first place.
+        if (! isPrepared)
+            return;
+
         const int numSamples = buffer.getNumSamples();
         auto* outL = buffer.getWritePointer (0);
         auto* outR = buffer.getWritePointer (1);
@@ -118,8 +186,17 @@ namespace dnaorbit::dsp
             const float rateHz   = rateHzSmoothed.getNextValue();
             const float autoGainAmount = autoGainAmountSmoothed.getNextValue();
 
-            const float sampleInL = inL[n];
-            const float sampleInR = stereoIn ? inR[n] : sampleInL;
+            // Sanitized at the single point audio enters the engine: the two
+            // one-pole filters below are recursive (state depends on the
+            // previous sample), so a single non-finite input sample - a bad
+            // upstream plugin, a glitching host - would otherwise latch their
+            // state to NaN forever, with nothing downstream ever able to clear
+            // it. Substituting silence here keeps every later stage finite by
+            // induction, since reset() guarantees the filter/delay state
+            // starts finite and every operation on finite, bounded values
+            // (sin/cos/exp/clamp) stays finite.
+            const float sampleInL = std::isfinite (inL[n]) ? inL[n] : 0.0f;
+            const float sampleInR = stereoIn ? (std::isfinite (inR[n]) ? inR[n] : 0.0f) : sampleInL;
             const float wetSource = stereoIn ? 0.5f * (sampleInL + sampleInR) : sampleInL;
             const float dryL = sampleInL;
             const float dryR = sampleInR;
@@ -316,15 +393,16 @@ namespace dnaorbit::dsp
             const double meanLL = sumLL * invN;
             const double meanRR = sumRR * invN;
 
-            uiOutputRms.store ((float) std::sqrt (0.5 * (meanLL + meanRR)), std::memory_order_relaxed);
+            const float rms = (float) std::sqrt (0.5 * (meanLL + meanRR));
+            uiOutputRms.store (std::isfinite (rms) ? rms : 0.0f, std::memory_order_relaxed);
 
             // Normalised L/R correlation: +1 mono, 0 uncorrelated, -1 out of phase.
             // Undefined for silence, so hold at +1 (mono-safe) rather than dividing by zero.
             const double denom = std::sqrt (meanLL * meanRR);
-            uiCorrelation.store (denom > 1.0e-12
+            const float correlation = denom > 1.0e-12
                                      ? (float) std::clamp ((sumLR * invN) / denom, -1.0, 1.0)
-                                     : 1.0f,
-                                 std::memory_order_relaxed);
+                                     : 1.0f;
+            uiCorrelation.store (std::isfinite (correlation) ? correlation : 1.0f, std::memory_order_relaxed);
         }
     }
 

@@ -28,7 +28,11 @@ namespace dnaorbit::dsp
 
         void setCutoffHz (float cutoffHz) noexcept
         {
-            const float clamped = std::clamp (cutoffHz, 20.0f, static_cast<float> (sampleRate * 0.49));
+            // std::clamp is UB if lo > hi, which would happen below ~41 Hz
+            // sample rate - never a real audio rate, but the max() keeps this
+            // safe regardless of what prepare() was called with.
+            const float upperBound = std::max (20.0f, static_cast<float> (sampleRate * 0.49));
+            const float clamped = std::clamp (cutoffHz, 20.0f, upperBound);
             const float x = std::exp (-2.0f * static_cast<float> (M_PI) * clamped / static_cast<float> (sampleRate));
             coefficient = x;
         }

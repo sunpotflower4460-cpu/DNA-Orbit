@@ -36,7 +36,8 @@ namespace
         double secondsToRun;
     };
 
-    void renderScenario (const Scenario& scenario, const juce::File& outputDir)
+    /** Returns true on success, so callers can turn a write failure into a non-zero exit code. */
+    bool renderScenario (const Scenario& scenario, const juce::File& outputDir)
     {
         DNAOrbitAudioProcessor processor;
 
@@ -86,17 +87,21 @@ namespace
         file.deleteFile();
 
         juce::FileOutputStream stream { file };
-        if (stream.openedOk())
+        if (! stream.openedOk())
         {
-            juce::PNGImageFormat png;
-            png.writeImageToStream (image, stream);
-            std::printf ("wrote %s\n", file.getFullPathName().toRawUTF8());
-        }
-        else
-        {
-            std::printf ("FAILED to write %s\n", file.getFullPathName().toRawUTF8());
+            std::printf ("FAILED to open %s for writing\n", file.getFullPathName().toRawUTF8());
+            return false;
         }
 
+        juce::PNGImageFormat png;
+        if (! png.writeImageToStream (image, stream))
+        {
+            std::printf ("FAILED to encode PNG for %s\n", file.getFullPathName().toRawUTF8());
+            return false;
+        }
+
+        std::printf ("wrote %s\n", file.getFullPathName().toRawUTF8());
+        return true;
     }
 }
 
@@ -106,7 +111,18 @@ int main (int argc, char** argv)
 
     const juce::File outputDir = argc > 1 ? juce::File (juce::String (argv[1]))
                                           : juce::File::getCurrentWorkingDirectory();
-    outputDir.createDirectory();
+
+    if (! outputDir.createDirectory())
+    {
+        std::printf ("FAILED to create output directory %s\n", outputDir.getFullPathName().toRawUTF8());
+        return 1;
+    }
+
+    // Sweep any *.png left by a previous run - including one from an older
+    // revision of this tool with different scenario file names - so stale
+    // output can never be mistaken for this run's result.
+    for (const auto& stale : outputDir.findChildFiles (juce::File::findFiles, false, "*.png"))
+        stale.deleteFile();
 
     const Scenario scenarios[] = {
         { "shot_basic_locked.png",  100.0f, 0.50f, false, 0, 3.0 },
@@ -116,8 +132,9 @@ int main (int argc, char** argv)
         { "shot_nullcore.png",      100.0f, 0.50f, true,  1, 3.0 },
     };
 
+    bool allOk = true;
     for (const auto& scenario : scenarios)
-        renderScenario (scenario, outputDir);
+        allOk = renderScenario (scenario, outputDir) && allOk;
 
-    return 0;
+    return allOk ? 0 : 1;
 }

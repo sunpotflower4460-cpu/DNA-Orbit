@@ -63,6 +63,21 @@ namespace dnaorbit::ui
         }
     }
 
+    void HelixView3D::applyQualityTier (int tier)
+    {
+        qualityTier = juce::jlimit (0, 2, tier);
+
+        switch (qualityTier)
+        {
+            case 0:  historyPoints = HelixHistory::size; nodesPerStrand = 20; glowBudget = 5; targetFps = 45; break;
+            case 1:  historyPoints = 100;                nodesPerStrand = 12; glowBudget = 1; targetFps = 36; break;
+            default: historyPoints = 72;                 nodesPerStrand = 8;  glowBudget = 0; targetFps = 24; break;
+        }
+
+        if (isTimerRunning())
+            startTimerHz (targetFps);
+    }
+
     void HelixView3D::resized()
     {
         const auto area = getLocalBounds().toFloat();
@@ -72,8 +87,12 @@ namespace dnaorbit::ui
         fit = Projection3D::computeFit (area.getWidth(), area.getHeight(), 16.0);
 
         // Force the lower tier on very large windows before measuring anything.
+        // Previously this only set the qualityTier NUMBER without updating the
+        // geometry counts it is supposed to gate, so the forced downgrade did
+        // nothing to actual render cost, and a later measured transition could
+        // jump 1->2 directly, skipping tier 1's settings entirely.
         if (getWidth() * getHeight() > 500000 && qualityTier == 0)
-            qualityTier = 1;
+            applyQualityTier (1);
 
         rebuildBackground();
         rebuildSprites();
@@ -361,11 +380,14 @@ namespace dnaorbit::ui
             return bg.interpolatedWith (c, 0.28f + 0.72f * std::pow (t, 0.85f));
         };
 
-        // Far to near: bucketing by depth-shade IS the painter's algorithm, so the
-        // depth sort falls out for free with no per-frame std::sort.
+        // Ribbon/rung fills are already far-to-near via the bucket loop below;
+        // sprites additionally need sorting within that so nodes emit in
+        // depth order as each bucket is reached. `nodes` is fully rebuilt by
+        // buildFrameGeometry() every frame before this runs, so nothing
+        // depends on its original insertion order - sorting it in place
+        // avoids a same-size heap-allocating copy on every single paint().
         std::size_t nodeIndex = 0;
-        auto sortedNodes = nodes;
-        std::sort (sortedNodes.begin(), sortedNodes.end(),
+        std::sort (nodes.begin(), nodes.end(),
                    [] (const NodeDraw& x, const NodeDraw& y) { return x.depth01 < y.depth01; });
 
         for (int bucket = 0; bucket < numBuckets; ++bucket)
@@ -391,10 +413,10 @@ namespace dnaorbit::ui
             }
 
             // Emit any spheres that belong at this depth.
-            while (nodeIndex < sortedNodes.size()
-                   && sortedNodes[nodeIndex].depth01 <= (double) bucketDepth + 1.0e-9)
+            while (nodeIndex < nodes.size()
+                   && nodes[nodeIndex].depth01 <= (double) bucketDepth + 1.0e-9)
             {
-                const auto& node = sortedNodes[nodeIndex];
+                const auto& node = nodes[nodeIndex];
                 const auto& ladder = node.strandB ? ladderB : ladderA;
 
                 if (ladder.isBuilt())
@@ -503,15 +525,9 @@ namespace dnaorbit::ui
         {
             if (++framesOverBudget > 20 && qualityTier < 2)
             {
-                ++qualityTier;
                 framesOverBudget = 0;
                 framesUnderBudget = 0;
-
-                if (qualityTier == 1) { historyPoints = 100; nodesPerStrand = 12; glowBudget = 1; targetFps = 36; }
-                else                  { historyPoints = 72;  nodesPerStrand = 8;  glowBudget = 0; targetFps = 24; }
-
-                if (isTimerRunning())
-                    startTimerHz (targetFps);
+                applyQualityTier (qualityTier + 1);
             }
         }
         else
@@ -519,14 +535,8 @@ namespace dnaorbit::ui
             framesOverBudget = 0;
             if (paintTimeEmaMs < frameIntervalMs * 0.25 && ++framesUnderBudget > 120 && qualityTier > 0)
             {
-                --qualityTier;
                 framesUnderBudget = 0;
-
-                if (qualityTier == 0) { historyPoints = HelixHistory::size; nodesPerStrand = 20; glowBudget = 5; targetFps = 45; }
-                else                  { historyPoints = 100; nodesPerStrand = 12; glowBudget = 1; targetFps = 36; }
-
-                if (isTimerRunning())
-                    startTimerHz (targetFps);
+                applyQualityTier (qualityTier - 1);
             }
         }
     }

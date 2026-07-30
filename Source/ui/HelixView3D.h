@@ -52,6 +52,15 @@ namespace dnaorbit::ui
         void rebuildBackground();
         void rebuildSprites();
 
+        /**
+         * Single source of truth for what a quality tier means: sets
+         * historyPoints/nodesPerStrand/glowBudget/targetFps together, so the
+         * tier NUMBER and the geometry counts it gates can never drift apart -
+         * unlike having resized()'s forced downgrade and paint()'s measured
+         * transitions each hand-write the same three tiers separately.
+         */
+        void applyQualityTier (int tier);
+
         struct Quad
         {
             juce::Point<float> a, b, c, d;

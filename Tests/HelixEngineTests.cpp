@@ -1,5 +1,6 @@
 #include <juce_core/juce_core.h>
 #include <juce_audio_basics/juce_audio_basics.h>
+#include <limits>
 #include "dsp/HelixEngine.h"
 
 using namespace dnaorbit::dsp;
@@ -381,6 +382,159 @@ namespace
                 engine.process (buffer, 1);
 
                 expect (allFinite (buffer), "Mono-in/stereo-out path must remain finite");
+            }
+
+            beginTest ("process() called before prepare() is a safe no-op, not a crash");
+            {
+                // juce::dsp::DelayLine's internal buffer has zero channels until
+                // prepare() sizes it; AudioBuffer::setSample's bounds check is
+                // assertion-only, so this used to write through an invalid
+                // channel pointer in a Release build if a host ever violated the
+                // prepare-before-process contract.
+                HelixEngine engine;
+                HelixEngine::Parameters p;
+                engine.setParameters (p);
+
+                juce::AudioBuffer<float> buffer (2, 256);
+                fillTestSignal (buffer, 48000.0);
+                juce::AudioBuffer<float> before;
+                before.makeCopyOf (buffer);
+
+                engine.process (buffer, 2);
+
+                expect (allFinite (buffer), "Must not corrupt memory or produce non-finite output");
+                for (int ch = 0; ch < 2; ++ch)
+                    for (int n = 0; n < 256; ++n)
+                        expectWithinAbsoluteError (buffer.getSample (ch, n), before.getSample (ch, n), 1.0e-9f,
+                                                    "Buffer must be left untouched (pass-through) when unprepared");
+
+                // And a subsequent, correct prepare()+process() must work normally.
+                engine.prepare (48000.0, 256, 2);
+                engine.setParameters (p);
+                fillTestSignal (buffer, 48000.0);
+                engine.process (buffer, 2);
+                expect (allFinite (buffer), "Must process normally once properly prepared");
+            }
+
+            beginTest ("primeParameters() snaps immediately instead of fading in from silence");
+            {
+                // Every SmoothedValue defaults to a current value of 0. Without
+                // primeParameters(), the very first block after prepare() would
+                // ramp Output/Mix/etc. up from that 0 over the smoothing window,
+                // audibly fading in from silence on every plugin load or
+                // sample-rate change regardless of the host's actual settings.
+                HelixEngine engine;
+                engine.prepare (48000.0, 256, 2);
+
+                HelixEngine::Parameters p;
+                p.mix01 = 1.0f;
+                p.outputDb = 0.0f; // unity gain: output should be at full level immediately
+                engine.primeParameters (p);
+                engine.setParameters (p);
+
+                juce::AudioBuffer<float> buffer (2, 256);
+                // A sine starting at phase 0 is exactly 0 at sample 0 regardless
+                // of any fade-in, which would defeat this test - use a cosine
+                // (peak amplitude at sample 0) instead.
+                for (int ch = 0; ch < 2; ++ch)
+                {
+                    auto* data = buffer.getWritePointer (ch);
+                    for (int n = 0; n < 256; ++n)
+                        data[n] = 0.5f * (float) std::cos (juce::MathConstants<double>::twoPi * 220.0 * n / 48000.0);
+                }
+                engine.process (buffer, 2);
+
+                // The very first sample of the very first block must already be
+                // near full level, not near zero.
+                expectGreaterThan (std::abs (buffer.getSample (0, 0)), 0.05f,
+                                    "First sample must not be faded in from silence after primeParameters()");
+            }
+
+            beginTest ("Without priming, the first block visibly ramps up from silence (documents the bug this fixes)");
+            {
+                // Same setup as above but using setParameters() alone (no
+                // primeParameters()), which is the pre-fix behaviour. This pins
+                // the contrast so a future regression that removes the
+                // primeParameters() call is caught.
+                HelixEngine engine;
+                engine.prepare (48000.0, 256, 2);
+
+                HelixEngine::Parameters p;
+                p.mix01 = 1.0f;
+                p.outputDb = 0.0f;
+                engine.setParameters (p);
+
+                juce::AudioBuffer<float> buffer (2, 256);
+                // Same cosine signal as the primed test above, so the only
+                // difference between the two tests is the primeParameters() call.
+                for (int ch = 0; ch < 2; ++ch)
+                {
+                    auto* data = buffer.getWritePointer (ch);
+                    for (int n = 0; n < 256; ++n)
+                        data[n] = 0.5f * (float) std::cos (juce::MathConstants<double>::twoPi * 220.0 * n / 48000.0);
+                }
+                engine.process (buffer, 2);
+
+                expectLessThan (std::abs (buffer.getSample (0, 0)), 1.0e-3f,
+                                 "Without priming the very first sample should still be near zero (ramping from the SmoothedValue default)");
+            }
+
+            beginTest ("A non-finite input sample does not permanently poison the filter state");
+            {
+                // The two one-pole filters are recursive: state depends on the
+                // previous sample. A single NaN/Inf sample used to latch that
+                // state to NaN forever, since nothing downstream could ever
+                // clear it.
+                HelixEngine engine;
+                engine.prepare (48000.0, 64, 2);
+                HelixEngine::Parameters p;
+                p.depth01 = 1.0f; p.mix01 = 1.0f;
+                engine.setParameters (p);
+
+                juce::AudioBuffer<float> buffer (2, 64);
+                buffer.clear();
+                buffer.setSample (0, 0, std::numeric_limits<float>::quiet_NaN());
+                buffer.setSample (1, 0, std::numeric_limits<float>::infinity());
+                engine.process (buffer, 2);
+
+                // Recover with clean silence afterward.
+                bool recovered = false;
+                for (int block = 0; block < 20; ++block)
+                {
+                    buffer.clear();
+                    engine.process (buffer, 2);
+                    if (allFinite (buffer))
+                        recovered = true;
+                    else
+                        recovered = false;
+                }
+
+                expect (recovered, "Filter state must recover to finite output after a non-finite input sample");
+            }
+
+            beginTest ("A non-finite parameter value falls back safely instead of latching theta to NaN");
+            {
+                HelixEngine engine;
+                engine.prepare (48000.0, 256, 2);
+
+                HelixEngine::Parameters p;
+                p.rateHz = std::numeric_limits<float>::quiet_NaN();
+                p.radius01 = std::numeric_limits<float>::infinity();
+                engine.setParameters (p);
+
+                juce::AudioBuffer<float> buffer (2, 256);
+                fillTestSignal (buffer, 48000.0);
+
+                for (int block = 0; block < 10; ++block)
+                {
+                    fillTestSignal (buffer, 48000.0);
+                    engine.process (buffer, 2);
+                    expect (allFinite (buffer), "Non-finite parameters must not propagate into the output");
+                }
+
+                const auto state = engine.getVisualState();
+                expect (std::isfinite (state.thetaA) && std::isfinite (state.thetaB),
+                        "Non-finite rate/radius parameters must not latch the orbit angles to NaN");
             }
         }
     };
