@@ -52,6 +52,9 @@ DNAOrbitAudioProcessor::DNAOrbitAudioProcessor()
     stereoPreserveParam = apvts.getRawParameterValue (dnaorbit::params::stereoPreserveID);
     bassAnchorHzParam   = apvts.getRawParameterValue (dnaorbit::params::bassAnchorHzID);
     characterParam      = apvts.getRawParameterValue (dnaorbit::params::characterID);
+    phaseModeParam      = apvts.getRawParameterValue (dnaorbit::params::phaseModeID);
+    startPhaseParam     = apvts.getRawParameterValue (dnaorbit::params::startPhaseID);
+    directionParam      = apvts.getRawParameterValue (dnaorbit::params::directionID);
 }
 
 void DNAOrbitAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
@@ -133,6 +136,36 @@ dnaorbit::dsp::HelixEngine::Parameters DNAOrbitAudioProcessor::currentParameterS
     // can only run after the cast has already happened.
     const float characterRaw = characterParam->load();
     p.character        = std::isfinite (characterRaw) ? (int) characterRaw : 0;
+
+    const float phaseModeRaw = phaseModeParam->load();
+    p.phaseMode      = std::isfinite (phaseModeRaw) ? (int) phaseModeRaw : 0;
+    p.startPhaseDeg  = startPhaseParam->load();
+    p.clockwise      = directionParam->load() < 0.5f; // choice index 0 = CW
+
+    // Host Lock needs the host's PPQ position and time signature directly
+    // (not just a derived rate), and Retrigger needs play-state edges -
+    // resolveRateHz() above already queried the playhead for BPM, but reads
+    // it again here rather than threading a shared snapshot through: this
+    // is a cheap query, not I/O, and keeping each concern self-contained is
+    // clearer than a shared-state parameter.
+    if (auto* currentPlayHead = getPlayHead())
+    {
+        if (const auto position = currentPlayHead->getPosition())
+        {
+            p.hostIsPlaying = position->getIsPlaying();
+
+            if (const auto ppq = position->getPpqPosition())
+                p.hostPpqPosition = *ppq;
+
+            double quarterNotesPerBar = 4.0;
+            if (const auto timeSig = position->getTimeSignature())
+                quarterNotesPerBar = (double) timeSig->numerator * 4.0
+                                    / (double) juce::jmax (1, timeSig->denominator);
+
+            const int divisionIndex = divisionParam != nullptr ? (int) divisionParam->load() : 2;
+            p.hostCycleBeats = dnaorbit::params::divisionIndexToBeats (divisionIndex, quarterNotesPerBar);
+        }
+    }
     return p;
 }
 

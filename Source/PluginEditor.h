@@ -77,9 +77,14 @@ private:
     juce::ToggleButton nullCoreButton;
     juce::ComboBox characterBox;
     juce::Label characterLabel;
+    // Start Phase itself has no dedicated knob yet (deferred to Phase 5's UI
+    // pass); it remains fully controllable via the host's generic parameter
+    // list / automation in the meantime.
+    juce::ComboBox phaseModeBox, directionBox;
+    juce::Label phaseModeLabel;
 
     std::unique_ptr<ButtonAttachment> syncAttachment, autoGainAttachment, nullCoreAttachment;
-    std::unique_ptr<ComboAttachment> divisionAttachment, characterAttachment;
+    std::unique_ptr<ComboAttachment> divisionAttachment, characterAttachment, phaseModeAttachment, directionAttachment;
 
     // Live readouts, updated on a slow timer so 45 fps helix repaints never
     // trigger glyph re-layout.

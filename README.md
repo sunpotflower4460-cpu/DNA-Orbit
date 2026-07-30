@@ -118,6 +118,9 @@ exceeds budget.
 | Stereo Preserve | `stereoPreserve` | 0 – 100% | **70%**, candidate pending listening (0% for projects saved before this parameter existed) | How much of the input's Side content is added back as a separate width "bed" alongside the strands. See below |
 | Bass Anchor | `bassAnchorHz` | 20 – 500 Hz (log-skewed) | 120 Hz, "Off" at 20 Hz (20 Hz for projects saved before this parameter existed) | Content below this frequency bypasses the orbit entirely and stays at its original stereo position. See below |
 | Character | `character` | Natural / Vivid / Deep | **Natural** | How strongly the back position is coloured (attenuation/cutoff/delay). Natural reproduces this plugin's original fixed sound exactly; Vivid and Deep darken and delay the back position progressively more |
+| Phase Mode | `phaseMode` | Free / Retrigger / Host Lock | **Free** | Free: unchanged continuous phase (no PPQ dependency). Retrigger: snaps to Start Phase the instant host playback starts. Host Lock: phase is continuously derived from the host's PPQ position. See below |
+| Start Phase | `startPhase` | 0 – 360° | 0° | The angle Retrigger snaps to, and the phase offset Host Lock's PPQ mapping is measured from. No dedicated knob yet (Detail tab) — automatable via the host's generic parameter list |
+| Direction | `direction` | CW / CCW | **CW** | Rotation direction; also which way Host Lock's PPQ-derived phase advances |
 
 When host tempo is unavailable while Sync is on, the plugin falls back
 safely to the free-running Rate knob rather than guessing a tempo.
@@ -209,14 +212,43 @@ progressively darken and delay the back position from there. See
 including the spec section (§6.2's high-shelf/presence EQ) deliberately not
 implemented yet.
 
+### Host Phase Lock
+
+`phaseMode` (Free / Retrigger / Host Lock), `startPhase` and `direction`
+tie the orbit's phase to the host transport instead of letting it run
+freely. **Free** (default) is exactly this plugin's original behaviour —
+phase is integrated purely from Rate, with no dependency on PPQ at all.
+**Retrigger** snaps Strand A's angle to `startPhase`/`direction` the instant
+host playback transitions from stopped to playing, so every loop/replay
+starts from the same visual and audible position. **Host Lock** goes
+further: while playing, it continuously derives the target angle from the
+host's PPQ position (`target = 2π · frac(direction · (ppq − phaseOffsetBeats)
+/ cycleBeats)`, with `cycleBeats` following the Sync Division mapping and
+adjusted for the host's actual time signature, not just 4/4) and pulls
+toward it with a proportional controller — a small extra angular velocity
+proportional to the current error, added every sample. That converges
+within roughly 20-50ms with no overshoot (a stable first-order system) and,
+because it recomputes the target fresh every block, handles both ordinary
+per-block drift and large transport jumps (loop points, scrubbing) through
+the same mechanism rather than needing special-cased ramp state. See
+`docs/commercial-upgrade/decisions/ADR-007-host-phase-lock.md` for the full
+design, including why Sync-on does not implicitly default `phaseMode` to
+Host Lock (kept fully independent and explicit, to avoid one parameter's
+default reacting to another's state).
+
+Like Character and Bass Anchor's own default, Free/0°/CW is bit-identical
+to this engine's pre-existing behaviour, so **no state-schema bump was
+needed** for any of these three new parameters.
+
 ### Presets
 
 Selectable from the プリセット menu in the 基本 tab. Defined in
 `Source/Presets.h` (GUI-independent, unit-tested) as a point in the full
-15-parameter space — Sync, Division, Output, Auto Gain, Stereo Preserve,
-Bass Anchor and Character are set explicitly by every preset (Sync off,
-Division 1 bar, Output 0 dB, Auto Gain on, Stereo Preserve 70%, Bass Anchor
-120 Hz, Character Natural, unless noted below), so choosing a preset is
+18-parameter space — Sync, Division, Output, Auto Gain, Stereo Preserve,
+Bass Anchor, Character and Host Phase Lock are set explicitly by every
+preset (Sync off, Division 1 bar, Output 0 dB, Auto Gain on, Stereo
+Preserve 70%, Bass Anchor 120 Hz, Character Natural, Phase Mode Free,
+unless noted below), so choosing a preset is
 deterministic: the result never depends on what was set before. The values
 are then saved with the project like any other setting.
 
@@ -365,7 +397,7 @@ built-in `UnitTest` framework:
   flat editor-state properties into their own `uiState` node, a fresh
   instance defaulting Stereo Preserve to 70%, and a schema-1 project loading
   with it forced to 0% instead.
-- **Presets** — every factory preset sets all 13 parameters the same way
+- **Presets** — every factory preset sets all 18 parameters the same way
   regardless of prior state (determinism), the Modified indicator matching
   right after applying a preset and going false once nudged, and Revert
   (re-apply) restoring the matched state.
@@ -414,6 +446,14 @@ built-in `UnitTest` framework:
   more than Natural (progressively), finite output across sample rates and
   Twist's maximum stacked with Deep's longer back delay, and that Mix 0%
   still matches Dry exactly at every value.
+- **HostPhaseLock** — that Retrigger resets to Start Phase exactly (and
+  only) at the instant playback starts, that Host Lock converges to the
+  PPQ-derived target angle with no steady-state error and then tracks it,
+  that Direction (CCW) reverses which way Host Lock's phase advances, that
+  the per-sample correction stays smooth (no sample-to-sample jump beyond
+  the existing tolerance) even across a large transport jump, and that
+  identical PPQ/parameter sequences produce identical output
+  (offline-bounce determinism).
 
 ## 10. Where the build output lands
 

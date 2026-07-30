@@ -136,6 +136,31 @@ silencing Wet, Mix-sweep RMS deviation bounds) for actually listening.
   presence EQ was deliberately not implemented - see the ADR) all need real
   ears on real source material.
 
+- **Host Phase Lock behaviour in a real DAW** (see
+  `docs/commercial-upgrade/decisions/ADR-007-host-phase-lock.md`): the PPQ
+  math, the 30ms proportional-controller convergence, and offline-bounce
+  determinism are all verified numerically in
+  `Tests/HostPhaseLockTests.cpp` against a synthetic playhead, but none of
+  the following have been checked against a real host transport:
+  1. **Loop points.** Whether Host Lock's re-target-every-block design
+     actually feels seamless (no audible click/glide) at the exact instant
+     a DAW's loop wraps back to the loop start, across a few different
+     DAWs' loop implementations (some report PPQ discontinuously at the
+     wrap, some interpolate).
+  2. **Tempo changes and scrubbing.** Whether the 30ms time constant feels
+     right (not too sluggish, not clicky) when a host's tempo changes
+     mid-playback or the user scrubs the timeline, since this container has
+     no way to drive a real, human-operated transport.
+  3. **Offline bounce reproducibility end-to-end.** `Tests/HostPhaseLockTests.cpp`
+     proves determinism for a synthetic identical PPQ sequence fed twice to
+     a fresh engine; it does not prove that a real DAW's offline-bounce
+     engine actually feeds PPQ deterministically block-to-block (this is a
+     property of the host, not of this plugin, but the end-to-end result
+     still needs a real bounce-and-compare check).
+  4. **Retrigger vs. Host Lock, chosen musically.** Whether Retrigger's
+     simpler "snap once on play" is what most users actually want by
+     default versus Host Lock's continuous tracking is a UX judgement call,
+     not something the numeric tests can answer.
 
 - **Bypass toggle audibility** (see `docs/commercial-upgrade/decisions/ADR-001-bypass-continuity.md`):
   Phase 1 fixed the engine's internal state freezing during bypass (orbit

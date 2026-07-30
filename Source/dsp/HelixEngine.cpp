@@ -58,6 +58,7 @@ namespace dnaorbit::dsp
         symmetryLocked = true;
         resyncStartError = 0.0;
         resyncSamplesRemaining = 0;
+        wasHostPlaying = false;
 
         lowPassA.reset();
         lowPassB.reset();
@@ -165,6 +166,16 @@ namespace dnaorbit::dsp
                 break;
         }
 
+        // Host Phase Lock: also read once per block - see the member
+        // comment in HelixEngine.h.
+        currentPhaseMode = juce::jlimit (0, 2, p.phaseMode);
+        currentStartPhaseDeg = std::isfinite (p.startPhaseDeg) ? p.startPhaseDeg : 0.0f;
+        currentClockwise = p.clockwise;
+        currentHostCycleBeats = std::isfinite (p.hostCycleBeats) && p.hostCycleBeats > 0.0
+                               ? p.hostCycleBeats : 4.0;
+        currentHostPpqPosition = std::isfinite (p.hostPpqPosition) ? p.hostPpqPosition : 0.0;
+        currentHostIsPlaying = p.hostIsPlaying;
+
         nullCoreTarget = p.nullCore;
 
         const float autoGainAmount = p.autoGain ? 1.0f : 0.0f;
@@ -227,6 +238,51 @@ namespace dnaorbit::dsp
 
         // Block accumulators for the UI meters (computed on the output).
         double sumLL = 0.0, sumRR = 0.0, sumLR = 0.0;
+
+        // --- Host Phase Lock / Retrigger: block-level (control-rate) phase work ---
+        // Both only ever touch thetaA; thetaB (when Symmetry-locked) already
+        // follows thetaA + pi every sample via the existing lock logic below,
+        // so neither mode needs to touch thetaB separately.
+        double hostLockCorrectionPerSample = 0.0;
+
+        if (currentPhaseMode == 1) // Retrigger
+        {
+            if (currentHostIsPlaying && ! wasHostPlaying)
+            {
+                const double startRad = (currentClockwise ? 1.0 : -1.0)
+                                       * (double) currentStartPhaseDeg * orbitmath::pi / 180.0;
+                thetaA = orbitmath::wrapTwoPi (startRad);
+                thetaB = orbitmath::wrapTwoPi (thetaA + orbitmath::pi);
+                symmetryLocked = true;
+                resyncSamplesRemaining = 0;
+            }
+        }
+        else if (currentPhaseMode == 2 && currentHostIsPlaying) // Host Lock
+        {
+            // phase = 2*pi * fract(direction * (ppq - startPhaseBeats) / cycleBeats)
+            // - the spec's formula, computed once per block from the host's
+            // PPQ position. Rather than snapping thetaA to this target (which
+            // would click on every ordinary rounding/reporting jitter) or
+            // maintaining a separate stateful resync ramp, add a small extra
+            // angular velocity proportional to the current error - a simple
+            // proportional controller that converges within the spec's
+            // 20-50ms window (hostLockCorrectionTimeConstantSeconds) for both
+            // ordinary per-block drift and genuine transport jumps (loops,
+            // scrubbing) alike, and is stable by construction (first-order,
+            // no overshoot) since it always pulls toward the freshly
+            // recomputed target rather than an aging one.
+            const double phaseOffsetBeats = ((double) currentStartPhaseDeg / 360.0) * currentHostCycleBeats;
+            const double directionSign = currentClockwise ? 1.0 : -1.0;
+            double fraction = std::fmod (directionSign * (currentHostPpqPosition - phaseOffsetBeats)
+                                          / currentHostCycleBeats, 1.0);
+            if (fraction < 0.0)
+                fraction += 1.0;
+            const double targetTheta = fraction * orbitmath::twoPi;
+            const double error = orbitmath::shortestAngleDelta (thetaA, targetTheta);
+            hostLockCorrectionPerSample = error / (hostLockCorrectionTimeConstantSeconds * sampleRate);
+        }
+
+        wasHostPlaying = currentHostIsPlaying;
 
         for (int n = 0; n < numSamples; ++n)
         {
@@ -301,7 +357,8 @@ namespace dnaorbit::dsp
             const float bedR = -stereoPreserve * side;
 
             // --- Orbit angle update -------------------------------------------------
-            const double incA = orbitmath::angularIncrement ((double) rateHz, sampleRate);
+            const double incA = orbitmath::angularIncrement ((double) rateHz, sampleRate)
+                               + hostLockCorrectionPerSample;
             thetaA = orbitmath::wrapTwoPi (thetaA + incA);
             phaseAccumA = std::fmod (phaseAccumA + incA, phaseModulus);
 

@@ -24,6 +24,9 @@ namespace dnaorbit::params
     inline constexpr const char* stereoPreserveID = "stereoPreserve";
     inline constexpr const char* bassAnchorHzID   = "bassAnchorHz";
     inline constexpr const char* characterID      = "character";
+    inline constexpr const char* phaseModeID      = "phaseMode";
+    inline constexpr const char* startPhaseID     = "startPhase";
+    inline constexpr const char* directionID      = "direction";
 
     /**
      * State schema version, stored as a property on apvts.state (alongside
@@ -118,25 +121,42 @@ namespace dnaorbit::params
         "4 bars", "2 bars", "1 bar", "1/2", "1/4", "1/8"
     };
 
-    /** Number of quarter-note beats per one full orbit cycle, indexed as above (assumes 4/4). */
-    inline double divisionIndexToBeats (int index) noexcept
+    /**
+     * How many bars each division choice spans, independent of time
+     * signature (a "bar" always means one measure, whatever its length).
+     */
+    inline double divisionIndexToBars (int index) noexcept
     {
         switch (index)
         {
-            case 0: return 16.0; // 4 bars
-            case 1: return 8.0;  // 2 bars
-            case 2: return 4.0;  // 1 bar
-            case 3: return 2.0;  // 1/2
-            case 4: return 1.0;  // 1/4
-            case 5: return 0.5; // 1/8
-            default: return 4.0;
+            case 0: return 4.0;   // 4 bars
+            case 1: return 2.0;   // 2 bars
+            case 2: return 1.0;   // 1 bar
+            case 3: return 0.5;   // 1/2 bar
+            case 4: return 0.25;  // 1/4 bar
+            case 5: return 0.125; // 1/8 bar
+            default: return 1.0;
         }
     }
 
-    /** Converts a host tempo (BPM) and division index into an orbit rate in Hz. */
-    inline double syncedRateHz (double bpm, int divisionIndex) noexcept
+    /**
+     * Number of quarter-note beats per one full orbit cycle. quarterNotesPerBar
+     * defaults to 4/4 for any caller that does not have host time-signature
+     * info; passing the host's actual numerator*4/denominator makes "N bars"
+     * mean the same wall-clock duration under any time signature (see
+     * docs/commercial-upgrade/02_DSP再設計仕様書.md §5.4).
+     */
+    inline double divisionIndexToBeats (int index, double quarterNotesPerBar = 4.0) noexcept
     {
-        const double beatsPerCycle = divisionIndexToBeats (divisionIndex);
+        if (quarterNotesPerBar <= 0.0)
+            quarterNotesPerBar = 4.0;
+        return divisionIndexToBars (index) * quarterNotesPerBar;
+    }
+
+    /** Converts a host tempo (BPM) and division index into an orbit rate in Hz. */
+    inline double syncedRateHz (double bpm, int divisionIndex, double quarterNotesPerBar = 4.0) noexcept
+    {
+        const double beatsPerCycle = divisionIndexToBeats (divisionIndex, quarterNotesPerBar);
         if (bpm <= 0.0 || beatsPerCycle <= 0.0)
             return rateDefaultHz;
         const double secondsPerCycle = beatsPerCycle * (60.0 / bpm);
@@ -265,6 +285,28 @@ namespace dnaorbit::params
         paramList.push_back (std::make_unique<juce::AudioParameterChoice> (
             juce::ParameterID { characterID, 1 }, "Character",
             juce::StringArray { "Natural", "Vivid", "Deep" }, 0));
+
+        // Free (index 0) is exactly this engine's original continuous,
+        // rate-integrated phase - no PPQ dependency, no retrigger-on-play -
+        // so, like Character, this needed no schema-version bump: the
+        // default reproduces every existing project's behaviour unchanged.
+        // Host Lock computes phase directly from the host's PPQ position
+        // (drift-free, reproducible across replays/offline bounce);
+        // Retrigger resets to Start Phase only when playback starts. See
+        // HelixEngine::process() and
+        // docs/commercial-upgrade/decisions/ADR-007-host-phase-lock.md.
+        paramList.push_back (std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID { phaseModeID, 1 }, "Phase Mode",
+            juce::StringArray { "Free", "Retrigger", "Host Lock" }, 0));
+
+        paramList.push_back (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { startPhaseID, 1 }, "Start Phase",
+            juce::NormalisableRange<float> (0.0f, 360.0f, 0.01f), 0.0f,
+            juce::AudioParameterFloatAttributes().withLabel (juce::String (juce::CharPointer_UTF8 ("°")))));
+
+        paramList.push_back (std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID { directionID, 1 }, "Direction",
+            juce::StringArray { "CW", "CCW" }, 0));
 
         return { paramList.begin(), paramList.end() };
     }

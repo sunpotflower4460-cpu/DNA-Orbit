@@ -91,6 +91,41 @@ namespace dnaorbit::dsp
              * absolute numbers for "Natural".
              */
             int character = 0;
+
+            /**
+             * 0 = Free (this engine's original continuous, rate-integrated
+             * phase - no PPQ dependency, no retrigger; the default, and the
+             * only mode that existed before this parameter did, so it needed
+             * no schema bump). 1 = Retrigger (resets to startPhaseDeg only
+             * when hostIsPlaying transitions false -> true). 2 = Host Lock
+             * (phase tracks the host's PPQ position directly, converging
+             * over ~30ms rather than snapping, so ordinary per-block drift
+             * and genuine transport jumps - loops, scrubs - are both handled
+             * by the same mechanism). See process() and
+             * docs/commercial-upgrade/decisions/ADR-007-host-phase-lock.md.
+             */
+            int phaseMode = 0;
+
+            /** Degrees; used by Retrigger and Host Lock only. */
+            float startPhaseDeg = 0.0f;
+
+            /** True = clockwise (this engine's original, positive-increment direction). */
+            bool clockwise = true;
+
+            /**
+             * Beats per full orbit cycle for Host Lock, already resolved
+             * from Sync Division and the host's time signature (quarter
+             * notes per bar) by PluginProcessor - HelixEngine stays free of
+             * APVTS/parameter-ID concerns, so it takes a plain beat count
+             * rather than a division index.
+             */
+            double hostCycleBeats = 4.0;
+
+            /** Host transport's current PPQ position (block start), for Host Lock. */
+            double hostPpqPosition = 0.0;
+
+            /** Host transport play state, for Retrigger and Host Lock. */
+            bool hostIsPlaying = false;
         };
 
         void prepare (double newSampleRate, int maximumBlockSize, int maxChannelsHint);
@@ -176,6 +211,10 @@ namespace dnaorbit::dsp
         static constexpr double phaseModulus = orbitmath::twoPi * 4096.0;
         bool   symmetryLocked = true;
 
+        /** Host Phase Lock: Retrigger detects the false->true edge of this. */
+        bool wasHostPlaying = false;
+        static constexpr double hostLockCorrectionTimeConstantSeconds = 0.03; // within the 20-50ms spec window
+
         // Fixed-duration linear resync ramp used when Symmetry returns to 100%
         // (see process()). Bounded and deterministic, unlike an exponential
         // tail, so it reliably completes within resyncDurationSeconds.
@@ -224,6 +263,17 @@ namespace dnaorbit::dsp
         // guidance to move filter-coefficient updates to control rate).
         LinkwitzRileyCrossover bassAnchorL, bassAnchorR;
         bool  bassAnchorBypassed = true;
+
+        // Host Phase Lock: read once per block in applyParameters(), like
+        // Bass Anchor and Character - none of these need per-sample
+        // smoothing (phaseMode is a discrete switch; the host-lock
+        // correction below already converges smoothly on its own).
+        int    currentPhaseMode = 0;
+        float  currentStartPhaseDeg = 0.0f;
+        bool   currentClockwise = true;
+        double currentHostCycleBeats = 4.0;
+        double currentHostPpqPosition = 0.0;
+        bool   currentHostIsPlaying = false;
 
         // Per-strand processing chains.
         OnePoleLowPass lowPassA, lowPassB;

@@ -146,6 +146,25 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
     addAndMakeVisible (characterBox);
     characterAttachment = std::make_unique<ComboAttachment> (processorRef.apvts, params::characterID, characterBox);
 
+    phaseModeLabel.setText (jp("位相"), juce::dontSendNotification);
+    phaseModeLabel.setFont (japaneseFont (11.0f));
+    phaseModeLabel.setJustificationType (juce::Justification::centredLeft);
+    phaseModeLabel.setColour (juce::Label::textColourId, dnaorbit::ui::DnaLookAndFeel::textColour());
+    addAndMakeVisible (phaseModeLabel);
+
+    phaseModeBox.addItemList (juce::StringArray { jp ("フリー"), jp ("リトリガー"), jp ("ホスト同期") }, 1);
+    phaseModeBox.setTooltip (jp("フリーは今までどおり自由に回り続けます。リトリガーは再生開始のたびに")
+                             + jp("開始位相へ戻ります。ホスト同期はDAWの再生位置(PPQ)から位相を直接")
+                             + jp("計算するので、ループやジャンプをしても常にタイムラインと一致します。"));
+    addAndMakeVisible (phaseModeBox);
+    phaseModeAttachment = std::make_unique<ComboAttachment> (processorRef.apvts, params::phaseModeID, phaseModeBox);
+
+    directionBox.addItemList (juce::StringArray { "CW", "CCW" }, 1);
+    directionBox.setTooltip (jp("回転方向です。CWは時計回り、CCWは反時計回り。")
+                             + jp("ホスト同期のときは位相の進む向きにも影響します。"));
+    addAndMakeVisible (directionBox);
+    directionAttachment = std::make_unique<ComboAttachment> (processorRef.apvts, params::directionID, directionBox);
+
     // --- Readouts ---------------------------------------------------------------
     // Monospaced with a fixed sign column: digit-width jitter at high refresh
     // rates is the classic cheap-plugin tell.
@@ -254,6 +273,9 @@ void DNAOrbitAudioProcessorEditor::showPage (int page)
     nullCoreButton.setVisible (! basic);
     characterBox.setVisible (! basic);
     characterLabel.setVisible (! basic);
+    phaseModeBox.setVisible (! basic);
+    phaseModeLabel.setVisible (! basic);
+    directionBox.setVisible (! basic);
 
     presetBox.setVisible (basic);
     presetLabel.setVisible (basic);
@@ -316,7 +338,7 @@ void DNAOrbitAudioProcessorEditor::paint (juce::Graphics& g)
     // Panel behind the control area.
     auto area = getLocalBounds().reduced (12);
     area.removeFromTop (44);
-    const auto controlArea = area.removeFromBottom (128);
+    const auto controlArea = area.removeFromBottom (152);
     g.setColour (dnaorbit::ui::DnaLookAndFeel::panelColour().withAlpha (0.6f));
     g.fillRoundedRectangle (controlArea.toFloat(), 6.0f);
 }
@@ -363,7 +385,7 @@ void DNAOrbitAudioProcessorEditor::resized()
     presetBox.setBounds (presetArea);
 
     // --- Control area ----------------------------------------------------------
-    auto controlArea = area.removeFromBottom (128).reduced (8);
+    auto controlArea = area.removeFromBottom (152).reduced (8);
 
     if (currentPage == 0)
     {
@@ -385,9 +407,16 @@ void DNAOrbitAudioProcessorEditor::resized()
         toggleColumn.removeFromTop (4);
         nullCoreButton.setBounds (toggleColumn.removeFromTop (26));
 
-        auto characterRow = toggleColumn; // whatever remains
+        toggleColumn.removeFromTop (4);
+        auto characterRow = toggleColumn.removeFromTop (26);
         characterLabel.setBounds (characterRow.removeFromLeft (34));
         characterBox.setBounds (characterRow);
+
+        toggleColumn.removeFromTop (4);
+        auto phaseRow = toggleColumn; // whatever remains
+        phaseModeLabel.setBounds (phaseRow.removeFromLeft (34));
+        directionBox.setBounds (phaseRow.removeFromRight (54));
+        phaseModeBox.setBounds (phaseRow);
 
         layOutKnobRow (controlArea, { &symmetryKnob, &twistKnob, &coreKnob, &outputKnob, &stereoPreserveKnob, &bassAnchorKnob });
     }

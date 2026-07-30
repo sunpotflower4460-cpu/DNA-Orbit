@@ -35,14 +35,21 @@ namespace dnaorbit::presets
         // exactly), 1 = Vivid, 2 = Deep. Every current factory preset keeps
         // Natural; not perceptually re-tuned per preset without listening.
         int character;
+        // 0 = Free, 1 = Retrigger, 2 = Host Lock. Every current factory
+        // preset keeps Free (this engine's original phase behaviour);
+        // Host Lock needs host transport to demonstrate, so it is left as
+        // an explicit user choice rather than a preset default.
+        int   phaseMode;
+        float startPhaseDeg;
+        bool  clockwise;
     };
 
     inline const Preset presets[] = {
-        { "ボーカルを広げる", 0.10f, false, 2,  75.0f, 45.0f, 100.0f, 4.0f, 10.0f, false, 30.0f, 0.0f, true, 70.0f, 120.0f, 0 },
-        { "パッドを回す",     0.18f, false, 2, 100.0f, 65.0f, 100.0f, 7.0f, 10.0f, false, 45.0f, 0.0f, true, 70.0f, 120.0f, 0 },
-        { "ギターに揺らぎ",   0.08f, false, 2,  80.0f, 60.0f,  88.0f, 6.0f, 15.0f, false, 40.0f, 0.0f, true, 70.0f, 120.0f, 0 },
-        { "シンセを速く回す", 0.60f, false, 2,  90.0f, 70.0f, 100.0f, 8.0f,  0.0f, false, 40.0f, 0.0f, true, 70.0f, 120.0f, 0 },
-        { "実験:中心を消す", 0.04f, false, 2, 100.0f, 50.0f, 100.0f, 8.0f,  0.0f, true,  30.0f, 0.0f, true, 70.0f, 120.0f, 0 },
+        { "ボーカルを広げる", 0.10f, false, 2,  75.0f, 45.0f, 100.0f, 4.0f, 10.0f, false, 30.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true },
+        { "パッドを回す",     0.18f, false, 2, 100.0f, 65.0f, 100.0f, 7.0f, 10.0f, false, 45.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true },
+        { "ギターに揺らぎ",   0.08f, false, 2,  80.0f, 60.0f,  88.0f, 6.0f, 15.0f, false, 40.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true },
+        { "シンセを速く回す", 0.60f, false, 2,  90.0f, 70.0f, 100.0f, 8.0f,  0.0f, false, 40.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true },
+        { "実験:中心を消す", 0.04f, false, 2, 100.0f, 50.0f, 100.0f, 8.0f,  0.0f, true,  30.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true },
     };
 
     inline constexpr int numPresets = (int) (sizeof (presets) / sizeof (presets[0]));
@@ -74,6 +81,9 @@ namespace dnaorbit::presets
         set (params::stereoPreserveID, preset.stereoPreserve);
         set (params::bassAnchorHzID, preset.bassAnchorHz);
         set (params::characterID, (float) preset.character);
+        set (params::phaseModeID, (float) preset.phaseMode);
+        set (params::startPhaseID, preset.startPhaseDeg);
+        set (params::directionID, preset.clockwise ? 0.0f : 1.0f);
     }
 
     /**
@@ -109,6 +119,9 @@ namespace dnaorbit::presets
             && isOn (params::autoGainID, preset.autoGain)
             && isClose (params::stereoPreserveID, preset.stereoPreserve)
             && isClose (params::bassAnchorHzID, preset.bassAnchorHz, 1.0f)
-            && isClose (params::characterID, (float) preset.character, 0.5f);
+            && isClose (params::characterID, (float) preset.character, 0.5f)
+            && isClose (params::phaseModeID, (float) preset.phaseMode, 0.5f)
+            && isClose (params::startPhaseID, preset.startPhaseDeg, 1.0f)
+            && isOn (params::directionID, ! preset.clockwise); // choice index 1 (CCW) == "on"
     }
 }
