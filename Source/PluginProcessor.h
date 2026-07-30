@@ -57,8 +57,7 @@ private:
     std::atomic<float>* nullCoreParam   = nullptr;
     std::atomic<float>* mixParam        = nullptr;
     std::atomic<float>* outputParam     = nullptr;
-
-    double lastKnownBpm = 120.0;
+    std::atomic<float>* autoGainParam   = nullptr;
 
     float resolveRateHz() const noexcept;
 

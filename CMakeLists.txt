@@ -8,6 +8,13 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(DNA_ORBIT_BUILD_TESTS "Build the DNA Orbit unit test suite" ON)
 
+# The UI text is Japanese, so the sources are UTF-8. GCC/Clang assume UTF-8
+# already; MSVC needs to be told explicitly for both the source and execution
+# character sets, otherwise the literals are mangled.
+if (MSVC)
+    add_compile_options(/utf-8)
+endif()
+
 # ---------------------------------------------------------------------------
 # JUCE acquisition
 #

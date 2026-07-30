@@ -18,6 +18,7 @@ DNAOrbitAudioProcessor::DNAOrbitAudioProcessor()
     nullCoreParam = apvts.getRawParameterValue (dnaorbit::params::nullCoreID);
     mixParam      = apvts.getRawParameterValue (dnaorbit::params::mixID);
     outputParam   = apvts.getRawParameterValue (dnaorbit::params::outputID);
+    autoGainParam = apvts.getRawParameterValue (dnaorbit::params::autoGainID);
 }
 
 void DNAOrbitAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
@@ -90,6 +91,7 @@ void DNAOrbitAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     p.nullCore   = nullCoreParam->load() > 0.5f;
     p.mix01      = mixParam->load()      / 100.0f;
     p.outputDb   = outputParam->load();
+    p.autoGain   = autoGainParam->load() > 0.5f;
 
     engine.setParameters (p);
     engine.process (buffer, totalNumInputChannels);

@@ -17,6 +17,8 @@ namespace dnaorbit::dsp
         mixSmoothed.reset (sampleRate, smoothParamSeconds);
         outputGainSmoothed.reset (sampleRate, smoothParamSeconds);
         nullCoreMixSmoothed.reset (sampleRate, nullCoreSeconds);
+        rateHzSmoothed.reset (sampleRate, smoothParamSeconds);
+        autoGainAmountSmoothed.reset (sampleRate, nullCoreSeconds);
 
         lowPassA.prepare (sampleRate);
         lowPassB.prepare (sampleRate);
@@ -57,18 +59,24 @@ namespace dnaorbit::dsp
         mixSmoothed.setCurrentAndTargetValue (mixSmoothed.getCurrentValue());
         outputGainSmoothed.setCurrentAndTargetValue (outputGainSmoothed.getCurrentValue());
         nullCoreMixSmoothed.setCurrentAndTargetValue (nullCoreMixSmoothed.getCurrentValue());
+        rateHzSmoothed.setCurrentAndTargetValue (rateHzSmoothed.getCurrentValue());
+        autoGainAmountSmoothed.setCurrentAndTargetValue (autoGainAmountSmoothed.getCurrentValue());
 
         uiThetaA.store (0.0f, std::memory_order_relaxed);
         uiThetaB.store ((float) orbitmath::pi, std::memory_order_relaxed);
         uiCentroidX.store (0.0f, std::memory_order_relaxed);
         uiCentroidZ.store (0.0f, std::memory_order_relaxed);
         uiCentroidDistance.store (0.0f, std::memory_order_relaxed);
+        uiOutputRms.store (0.0f, std::memory_order_relaxed);
+        uiCorrelation.store (1.0f, std::memory_order_relaxed);
     }
 
     void HelixEngine::setParameters (const Parameters& p) noexcept
     {
-        rateHzTarget = p.rateHz;
         nullCoreTarget = p.nullCore;
+
+        rateHzSmoothed.setTargetValue (p.rateHz);
+        autoGainAmountSmoothed.setTargetValue (p.autoGain ? 1.0f : 0.0f);
 
         radiusSmoothed.setTargetValue (p.radius01);
         depthSmoothed.setTargetValue (p.depth01);
@@ -91,6 +99,9 @@ namespace dnaorbit::dsp
         const float* inL = buffer.getReadPointer (0);
         const float* inR = stereoIn ? buffer.getReadPointer (1) : nullptr;
 
+        // Block accumulators for the UI meters (computed on the output).
+        double sumLL = 0.0, sumRR = 0.0, sumLR = 0.0;
+
         for (int n = 0; n < numSamples; ++n)
         {
             const float radius   = radiusSmoothed.getNextValue();
@@ -101,6 +112,8 @@ namespace dnaorbit::dsp
             const float mix      = mixSmoothed.getNextValue();
             const float outGain  = outputGainSmoothed.getNextValue();
             const float nullCoreAmount = nullCoreMixSmoothed.getNextValue();
+            const float rateHz   = rateHzSmoothed.getNextValue();
+            const float autoGainAmount = autoGainAmountSmoothed.getNextValue();
 
             const float sampleInL = inL[n];
             const float sampleInR = stereoIn ? inR[n] : sampleInL;
@@ -109,7 +122,7 @@ namespace dnaorbit::dsp
             const float dryR = sampleInR;
 
             // --- Orbit angle update -------------------------------------------------
-            const double incA = orbitmath::angularIncrement ((double) rateHzTarget, sampleRate);
+            const double incA = orbitmath::angularIncrement ((double) rateHz, sampleRate);
             thetaA = orbitmath::wrapTwoPi (thetaA + incA);
 
             const bool wantsLocked = symmetry >= (float) symmetryLockThreshold;
@@ -153,16 +166,17 @@ namespace dnaorbit::dsp
                 symmetryLocked = false;
                 resyncSamplesRemaining = 0; // force a fresh error capture next time we relock
                 const double diff = orbitmath::rateDifferenceFactor ((double) symmetry, maxRateDifference);
-                const double incB = orbitmath::angularIncrement ((double) rateHzTarget * (1.0 + diff), sampleRate);
+                const double incB = orbitmath::angularIncrement ((double) rateHz * (1.0 + diff), sampleRate);
                 thetaB = orbitmath::wrapTwoPi (thetaB + incB);
             }
 
             // --- Strand A: position, depth cues, pan --------------------------------
             const double backAmountA = orbitmath::backAmount (thetaA);
             const float gainDbA = -maxBackAttenDb * (float) backAmountA * depth;
+            const float backGainA = dbToGain (gainDbA);
             const float cutoffA = frontCutoffHz + (backCutoffHz - frontCutoffHz) * (float) backAmountA * depth;
             lowPassA.setCutoffHz (cutoffA);
-            const float filteredA = lowPassA.processSample (wetSource * dbToGain (gainDbA));
+            const float filteredA = lowPassA.processSample (wetSource * backGainA);
 
             const float backDelayMsA = maxBackDelayMs * (float) backAmountA * depth;
             const float delaySamplesA = std::clamp ((backDelayMsA * 0.001f) * (float) sampleRate, 0.0f, maxDelaySamplesStored - 1.0f);
@@ -178,9 +192,10 @@ namespace dnaorbit::dsp
             // --- Strand B: position, depth cues, twist decorrelation, pan -----------
             const double backAmountB = orbitmath::backAmount (thetaB);
             const float gainDbB = -maxBackAttenDb * (float) backAmountB * depth;
+            const float backGainB = dbToGain (gainDbB);
             const float cutoffB = frontCutoffHz + (backCutoffHz - frontCutoffHz) * (float) backAmountB * depth;
             lowPassB.setCutoffHz (cutoffB);
-            const float filteredB = lowPassB.processSample (wetSource * dbToGain (gainDbB));
+            const float filteredB = lowPassB.processSample (wetSource * backGainB);
 
             const float backDelayMsB = maxBackDelayMs * (float) backAmountB * depth;
             const float delaySamplesB = std::clamp (((backDelayMsB + twistMs) * 0.001f) * (float) sampleRate, 0.0f, maxDelaySamplesStored - 1.0f);
@@ -205,6 +220,54 @@ namespace dnaorbit::dsp
             wetL += (nulled.left  - wetL) * nullCoreAmount;
             wetR += (nulled.right - wetR) * nullCoreAmount;
 
+            // --- Wet level matching ---------------------------------------------------
+            // Deterministic (not signal-following, so it cannot pump): predict the
+            // wet path's gain purely from the current geometry and cancel it, so
+            // moving Mix does not change the perceived loudness.
+            //
+            // Each channel carries three copies of the same source at different
+            // delays: strand A (delayed dA), strand B (delayed dB) and the Core
+            // signal (undelayed). Copies at a similar delay add in AMPLITUDE;
+            // once their delays differ by more than a few ms they add in POWER.
+            // So sum the powers plus the pairwise cross terms, each weighted by a
+            // coherence factor from that pair's delay difference:
+            //
+            //   P = SUM(gi^2) + 2 * SUM over i<j of gi*gj*coherence(|di - dj|)
+            //
+            // Getting the Core cross terms right matters: Core is undelayed, so it
+            // sums coherently with whichever strand is currently near zero delay.
+            const float msPerSample = 1000.0f / (float) sampleRate;
+            const auto coherence = [] (float deltaMs) { return std::exp (-std::abs (deltaMs) / 4.0f); };
+
+            const float delayMsA = delaySamplesA * msPerSample;
+            const float delayMsB = delaySamplesB * msPerSample;
+            const float cAB = coherence (delayMsA - delayMsB);
+            const float cAC = coherence (delayMsA);   // strand A against the undelayed Core
+            const float cBC = coherence (delayMsB);   // strand B against the undelayed Core
+
+            const float aL = strandGain * backGainA * (float) gainsA.left;
+            const float aR = strandGain * backGainA * (float) gainsA.right;
+            const float bL = strandGain * backGainB * (float) gainsB.left;
+            const float bR = strandGain * backGainB * (float) gainsB.right;
+
+            const float powerL = aL * aL + bL * bL + core * core
+                               + 2.0f * (aL * bL * cAB + aL * core * cAC + bL * core * cBC);
+            const float powerR = aR * aR + bR * bR + core * core
+                               + 2.0f * (aR * bR * cAB + aR * core * cAC + bR * core * cBC);
+
+            // Reference: a coherent unit input has dry power 1^2 + 1^2 = 2 across the pair.
+            const float wetPower = powerL + powerR;
+            const float makeupTarget = wetPower > 1.0e-9f
+                                     ? std::clamp (std::sqrt (2.0f / wetPower), 1.0f / maxWetMakeupGain, maxWetMakeupGain)
+                                     : 1.0f;
+
+            // NULL CORE is deliberately NOT compensated: that mode is meant to be able
+            // to almost vanish in mono, and for near-mono material the required boost
+            // would be unbounded. The clamp above is the safety net.
+            const float wetMakeup = 1.0f + (makeupTarget - 1.0f) * autoGainAmount;
+            wetL *= wetMakeup;
+            wetR *= wetMakeup;
+
             // --- Dry/Wet mix, output gain ---------------------------------------------
             const auto dryWet = equalPowerMix (mix);
             float finalL = dryWet.dry * dryL + dryWet.wet * wetL;
@@ -219,6 +282,10 @@ namespace dnaorbit::dsp
 
             outL[n] = finalL;
             outR[n] = finalR;
+
+            sumLL += (double) finalL * finalL;
+            sumRR += (double) finalR * finalR;
+            sumLR += (double) finalL * finalR;
 
             if (n == numSamples - 1)
             {
@@ -235,6 +302,24 @@ namespace dnaorbit::dsp
                 uiSymmetry.store (symmetry, std::memory_order_relaxed);
             }
         }
+
+        // --- Publish meters for the UI (once per block) ------------------------------
+        if (numSamples > 0)
+        {
+            const double invN = 1.0 / (double) numSamples;
+            const double meanLL = sumLL * invN;
+            const double meanRR = sumRR * invN;
+
+            uiOutputRms.store ((float) std::sqrt (0.5 * (meanLL + meanRR)), std::memory_order_relaxed);
+
+            // Normalised L/R correlation: +1 mono, 0 uncorrelated, -1 out of phase.
+            // Undefined for silence, so hold at +1 (mono-safe) rather than dividing by zero.
+            const double denom = std::sqrt (meanLL * meanRR);
+            uiCorrelation.store (denom > 1.0e-12
+                                     ? (float) std::clamp ((sumLR * invN) / denom, -1.0, 1.0)
+                                     : 1.0f,
+                                 std::memory_order_relaxed);
+        }
     }
 
     HelixEngine::VisualState HelixEngine::getVisualState() const noexcept
@@ -248,6 +333,8 @@ namespace dnaorbit::dsp
         state.centroidDistance = uiCentroidDistance.load (std::memory_order_relaxed);
         state.nullCoreOn = uiNullCoreOn.load (std::memory_order_relaxed);
         state.symmetry01 = uiSymmetry.load (std::memory_order_relaxed);
+        state.outputRms = uiOutputRms.load (std::memory_order_relaxed);
+        state.correlation = uiCorrelation.load (std::memory_order_relaxed);
         return state;
     }
 }

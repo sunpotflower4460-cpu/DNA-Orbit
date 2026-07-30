@@ -35,6 +35,7 @@ namespace dnaorbit::dsp
             bool  nullCore   = false;
             float mix01      = 0.35f;
             float outputDb   = 0.0f;
+            bool  autoGain   = true;
         };
 
         void prepare (double newSampleRate, int maximumBlockSize, int maxChannelsHint);
@@ -61,6 +62,11 @@ namespace dnaorbit::dsp
             float centroidDistance = 0.0f;
             float symmetry01 = 1.0f;
             bool  nullCoreOn = false;
+
+            /** Output RMS (0..1-ish), used to make the visuals react to the audio. */
+            float outputRms = 0.0f;
+            /** L/R correlation of the output: +1 = mono, 0 = uncorrelated, -1 = out of phase. */
+            float correlation = 1.0f;
         };
 
         VisualState getVisualState() const noexcept;
@@ -89,8 +95,9 @@ namespace dnaorbit::dsp
         juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> mixSmoothed;
         juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> outputGainSmoothed;
         juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> nullCoreMixSmoothed;
+        juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> rateHzSmoothed;
+        juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> autoGainAmountSmoothed;
 
-        float rateHzTarget = 0.12f;
         bool  nullCoreTarget = false;
 
         // Per-strand processing chains.
@@ -107,6 +114,7 @@ namespace dnaorbit::dsp
         static constexpr double maxRateDifference = 0.03;
         static constexpr double symmetryLockThreshold = 0.999;
         static constexpr double resyncDurationSeconds = 0.2; // within the 100-300ms spec window
+        static constexpr float  maxWetMakeupGain = 4.0f;     // +12 dB ceiling
 
         // Published for the UI thread; written once per block.
         std::atomic<float> uiThetaA { 0.0f };
@@ -117,6 +125,8 @@ namespace dnaorbit::dsp
         std::atomic<float> uiCentroidDistance { 0.0f };
         std::atomic<float> uiSymmetry { 1.0f };
         std::atomic<bool>  uiNullCoreOn { false };
+        std::atomic<float> uiOutputRms { 0.0f };
+        std::atomic<float> uiCorrelation { 1.0f };
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HelixEngine)
     };
