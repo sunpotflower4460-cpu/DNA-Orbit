@@ -225,29 +225,58 @@ silencing Wet, Mix-sweep RMS deviation bounds) for actually listening.
 
 Per explicit user decision (this session), **no GitHub Actions workflow has
 been added**, despite the package requesting a Linux/macOS/Windows CI
-matrix. What *has* been added locally, and does run in this environment:
+matrix. What *has* been added locally, and does run in this environment, is
+a local equivalent of the CI matrix's Linux lane:
 
 ```sh
-# Standard build + test:
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release -j
-ctest --test-dir build --output-on-failure
-
-# Sanitizer build (ASan+UBSan), Debug config, GCC/Clang only:
-cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug -DDNA_ORBIT_SANITIZERS="address,undefined"
-cmake --build build-asan -j
-ctest --test-dir build-asan --output-on-failure
+./Tools/local_validate.sh
 ```
 
+This runs, in order (see the script for details, and MANUAL_REQUIRED.md's
+"clang-tidy / warnings-as-errors" section above for what it checks):
+1. Release build + full CTest suite
+2. ASan+UBSan Debug build + full CTest suite (GCC/Clang only)
+3. This project's own sources rebuilt with `-Werror`
+4. `clang-tidy` against this project's own `.cpp` files
+
+Every build directory it creates (`build-validate-*`) is removed afterward
+regardless of outcome, matching the existing throwaway-ASan-build
+convention already used throughout this project's history. Each individual
+step can also be run by hand - see the script's own commands, or the
+equivalent commands used elsewhere in this file (e.g. the ASan/UBSan
+commands under "Other platforms" above).
+
 If GitHub Actions (or another CI provider) is wanted later, the sanitizer
-option above (`DNA_ORBIT_SANITIZERS`) is already structured to drop straight
-into a workflow matrix step without further CMake changes.
+option (`DNA_ORBIT_SANITIZERS`) and the warnings-as-errors option
+(`DNA_ORBIT_WARNINGS_AS_ERRORS`) are already structured to drop straight
+into a workflow matrix step without further CMake changes - `Tools/
+local_validate.sh`'s four steps map directly onto four matrix jobs. The
+macOS/Windows lanes (pluginval, `auval`, VST3 Validator, installer smoke
+test) still need real machines with those toolchains - see "Other
+platforms" and "Validators" above.
 
 ## clang-tidy / warnings-as-errors
 
-Not run. `juce::juce_recommended_warning_flags` is linked (enables a broad
-warning set), but no `-Werror`/`/WX` configuration or `clang-tidy` pass has
-been added or executed.
+Now run locally, on this project's own sources only (never JUCE's, which
+this project does not control):
+
+```sh
+# -Werror, applied per-source-file to only Source/*.cpp and Tests/*.cpp:
+cmake -S . -B build-werror -DCMAKE_BUILD_TYPE=Release -DDNA_ORBIT_WARNINGS_AS_ERRORS=ON
+cmake --build build-werror --target DNAOrbit DNAOrbitTests -j
+
+# clang-tidy (see .clang-tidy for the check list and HeaderFilterRegex):
+clang-tidy -p build Source/PluginProcessor.cpp Source/PluginEditor.cpp \
+    Source/dsp/HelixEngine.cpp Source/ui/HelixView3D.cpp Source/ui/DnaLookAndFeel.cpp
+```
+
+Both are clean as of this writing (0 warnings). `Tools/local_validate.sh`
+runs both automatically as part of its local-CI-equivalent pass (see
+below). Not covered: MSVC `/W4`/`/WX` (this container has no Windows
+toolchain - see "Other platforms" above) and clang-tidy's `bugprone-`/
+`performance-` families are enabled but not the more opinionated
+`cppcoreguidelines-`/`llvm-`/`google-` families, which were judged too
+style-prescriptive to be worth the noise for this project.
 
 ## Screenshot / audio regression artifacts
 

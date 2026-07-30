@@ -458,6 +458,19 @@ cmake --build build --config Release -j
 ctest --test-dir build --output-on-failure
 ```
 
+For a fuller local pass — Release + CTest, ASan+UBSan + CTest, this
+project's own sources rebuilt with `-Werror`, and `clang-tidy` (see
+`.clang-tidy`) — run:
+
+```sh
+./Tools/local_validate.sh
+```
+
+This is the local equivalent of the CI matrix's Linux lane; see
+`MANUAL_REQUIRED.md`'s "CI" section for why this project runs no GitHub
+Actions workflow, and what the macOS/Windows lanes still need (real
+machines with those toolchains).
+
 The suite (`Tests/DNAOrbitTests`, run via CTest) covers, using JUCE's
 built-in `UnitTest` framework:
 

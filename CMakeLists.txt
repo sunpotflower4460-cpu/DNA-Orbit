@@ -25,6 +25,15 @@ if (NOT DNA_ORBIT_SANITIZERS STREQUAL "")
     endif()
 endif()
 
+# Local equivalent of the CI matrix's "warnings as errors" build (no CI
+# service is used for this project - see docs/commercial-upgrade/ - so this
+# is the only automated way to run it). Applied only to this project's own
+# targets (see the DNAOrbit/DNAOrbitTests target-specific blocks below), not
+# to JUCE's own sources, which this project does not control. Usage:
+#   cmake -S . -B build-werror -DDNA_ORBIT_WARNINGS_AS_ERRORS=ON
+#   cmake --build build-werror -j
+option(DNA_ORBIT_WARNINGS_AS_ERRORS "Treat this project's own compiler warnings as errors (GCC/Clang only)" OFF)
+
 # The UI text is Japanese, so the sources are UTF-8. GCC/Clang assume UTF-8
 # already; MSVC needs to be told explicitly for both the source and execution
 # character sets, otherwise the literals are mangled.
@@ -92,6 +101,16 @@ target_sources(DNAOrbit PRIVATE
 )
 
 target_include_directories(DNAOrbit PRIVATE Source)
+
+if (DNA_ORBIT_WARNINGS_AS_ERRORS AND NOT MSVC)
+    # Applied per-source-file (not via target_compile_options/
+    # add_compile_options) so it only touches this project's own
+    # translation units, never JUCE's vendored ones - juce_add_plugin
+    # compiles both into the same DNAOrbit target, and this project does
+    # not control JUCE's own warnings.
+    get_target_property(_dnaOrbitSources DNAOrbit SOURCES)
+    set_source_files_properties(${_dnaOrbitSources} PROPERTIES COMPILE_OPTIONS "-Werror")
+endif()
 
 target_compile_definitions(DNAOrbit PUBLIC
     JUCE_WEB_BROWSER=0
