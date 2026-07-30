@@ -136,13 +136,15 @@ namespace
                                                     "Mono (perfectly correlated L/R) input must sound identical at any Stereo Preserve value");
             }
 
-            beginTest ("Stereo Preserve 100% keeps Strand/Core content tied to its originating channel");
+            beginTest ("Stereo Preserve 100% keeps the output tied to its originating channel");
             {
                 // Radius 0 and Depth 0 remove the strand pan/back-gain's
                 // dependence on the orbit angle entirely (pan collapses to
                 // dead centre, back attenuation/delay collapse to none), so
-                // only Stereo Preserve's effect on the source split and on
-                // Core (which bypasses panning) can make L and R differ.
+                // only the Stereo Preserve bed (see the dedicated
+                // energy-weighted-centre test below) can make L and R differ
+                // here - Strand A/B and Core are always Mid-fed, hence always
+                // symmetric, regardless of Stereo Preserve (see ADR-004).
                 for (bool preserveFully : { false, true })
                 {
                     const float preserve = preserveFully ? 1.0f : 0.0f;
@@ -183,6 +185,94 @@ namespace
                         expectGreaterThan (outL - outR, 0.3f,
                                             "At Stereo Preserve 100%, L-only input must clearly favour the L output channel");
                     }
+                }
+            }
+
+            beginTest ("Energy-weighted centre: L-only and R-only give identical Strand+Core content at any Stereo Preserve");
+            {
+                // Phase 2.5 re-verification (see ADR-004): staying
+                // GEOMETRICALLY antipodal is not the same guarantee as
+                // staying ENERGY-balanced. Under an earlier design
+                // (sourceA = M + p*S, sourceB = M - p*S fed directly to each
+                // strand), L-only input made Strand A's own source far
+                // louder than Strand B's, so even though the two strands'
+                // POSITIONS stayed exactly opposite, the perceptually-
+                // weighted centre drifted toward whichever strand carried
+                // more energy. Feeding both strands (and Core) from Mid only
+                // removes this failure mode by construction: L-only and
+                // R-only share an IDENTICAL Mid signal (0.5*(L+R) is the same
+                // whether L or R carries the signal), so Strand A/B/Core's
+                // contribution must be bit-for-bit identical between the two
+                // scenarios - only the Stereo Preserve bed (built from Side,
+                // which flips sign between L-only and R-only) may differ,
+                // and by an exact, predictable amount.
+                for (float preserve : { 0.0f, 0.25f, 0.5f, 0.7f, 1.0f })
+                {
+                    HelixEngine::Parameters params;
+                    params.rateHz = 0.3f;
+                    params.radius01 = 0.8f;
+                    params.depth01 = 0.55f;
+                    params.symmetry01 = 1.0f;
+                    params.twistMs = 5.0f;
+                    params.core01 = 0.3f;
+                    params.mix01 = 1.0f;
+                    params.outputDb = 0.0f;
+                    // Auto Gain off: isolates this measurement from the
+                    // correlation-aware Mix Law, which - unlike everything
+                    // else in the engine - IS legitimately signal-adaptive,
+                    // so it can differ between the L-only and R-only runs
+                    // (their Dry signals differ) even though Strand/Core
+                    // themselves do not. That is tested on its own merits
+                    // elsewhere, not here.
+                    params.autoGain = false;
+                    params.stereoPreserve01 = preserve;
+
+                    HelixEngine engineLOnly, engineROnly;
+                    engineLOnly.prepare (48000.0, 256, 2);
+                    engineROnly.prepare (48000.0, 256, 2);
+                    engineLOnly.primeParameters (params);
+                    engineLOnly.setParameters (params);
+                    engineROnly.primeParameters (params);
+                    engineROnly.setParameters (params);
+
+                    juce::AudioBuffer<float> bufferLOnly (2, 256), bufferROnly (2, 256);
+                    std::vector<float> sValues (256);
+                    juce::Random random { 5150 };
+
+                    double maxError = 0.0;
+
+                    for (int block = 0; block < 20; ++block)
+                    {
+                        for (int n = 0; n < 256; ++n)
+                        {
+                            const float s = 0.3f * (random.nextFloat() * 2.0f - 1.0f);
+                            sValues[(size_t) n] = s;
+                            bufferLOnly.setSample (0, n, s);
+                            bufferLOnly.setSample (1, n, 0.0f);
+                            bufferROnly.setSample (0, n, 0.0f);
+                            bufferROnly.setSample (1, n, s);
+                        }
+
+                        engineLOnly.process (bufferLOnly, 2);
+                        engineROnly.process (bufferROnly, 2);
+
+                        for (int n = 0; n < 256; ++n)
+                        {
+                            // side(L-only) = 0.5*s, side(R-only) = -0.5*s, so
+                            // bedL(L-only) - bedL(R-only) == preserve * s.
+                            // Strand+Core cancel exactly (identical Mid), so
+                            // this predicts the FULL output difference.
+                            const double expected = (double) preserve * sValues[(size_t) n];
+                            const double actual = (double) bufferLOnly.getSample (0, n)
+                                                 - (double) bufferROnly.getSample (0, n);
+                            maxError = juce::jmax (maxError, std::abs (actual - expected));
+                        }
+                    }
+
+                    expectLessThan (maxError, 1.0e-4,
+                                     "L-only vs R-only output difference must match the predicted bed contribution exactly "
+                                     "(Strand+Core must be energy-identical, not just position-antipodal), at Stereo Preserve = "
+                                     + juce::String (preserve));
                 }
             }
 

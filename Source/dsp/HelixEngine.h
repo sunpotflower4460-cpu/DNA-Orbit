@@ -38,14 +38,29 @@ namespace dnaorbit::dsp
             bool  autoGain   = true;
 
             /**
-             * 0 = both strands (and Core) are fed from a shared Mid downmix
-             * (the schema-1 behaviour: anti-phase stereo input collapses Wet
-             * to silence). 1 = Strand A/B are fed directly from L/R. Defaults
-             * to 0 here - the schema-1-compatible, source-independent
-             * default - so any caller that forgets to set it explicitly gets
-             * the old behaviour rather than a silent change; the actual
-             * product default of 70% lives in Parameters.h and is applied by
-             * PluginProcessor.
+             * 0 = Wet is built purely from Mid (the schema-1 behaviour:
+             * anti-phase stereo input collapses Wet to silence, wide stereo
+             * loses its L/R identity). At 0 < p <= 1, the two strands and
+             * Core stay fed from Mid ONLY - so the orbit's energy is always
+             * exactly balanced between Strand A and Strand B, regardless of
+             * how asymmetric the input is between L and R - while the
+             * input's Side content is added back as a separate, non-orbiting
+             * "Stereo Preserve Bed" term at amount p (see process() and
+             * docs/commercial-upgrade/decisions/ADR-004-stereo-preserve-bed.md).
+             * This is a deliberate redesign from an earlier version that fed
+             * L into Strand A and R into Strand B directly: that version
+             * geometrically kept the two strands antipodal, but an
+             * asymmetric input (e.g. L-only) made one strand's *energy*
+             * dominate the other's, so the perceptual centre drifted toward
+             * whichever strand carried more signal even though their
+             * *positions* stayed exactly opposite. Feeding both strands from
+             * Mid removes that failure mode entirely, by construction.
+             *
+             * Defaults to 0 here - the schema-1-compatible, source-
+             * independent default - so any caller that forgets to set it
+             * explicitly gets the old behaviour rather than a silent change;
+             * the actual product default lives in Parameters.h and is
+             * applied by PluginProcessor.
              */
             float stereoPreserve01 = 0.0f;
         };
@@ -154,6 +169,24 @@ namespace dnaorbit::dsp
         juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> stereoPreserveSmoothed;
 
         bool  nullCoreTarget = false;
+
+        /**
+         * Slow (~200ms) running estimate of Dry/Wet correlation, used by the
+         * correlation-aware Mix Law (see process()) to cancel the loudness
+         * bump that an equal-power Dry/Wet blend produces when Dry and Wet
+         * are substantially correlated (e.g. Core-heavy, low-Radius/Depth
+         * settings where Wet resembles Dry). A single one-pole time constant
+         * rather than the spec's separate attack/release: correlation is a
+         * statistical estimate, not a transient envelope to catch fast and
+         * release slowly, and a single conservative constant is simpler and
+         * already avoids pumping (see corrCoefficient in prepare()).
+         */
+        float corrDryPowState = 0.0f;
+        float corrWetPowState = 0.0f;
+        float corrCrossState = 0.0f;
+        float corrCoefficient = 0.0f;
+        static constexpr double correlationTimeConstantSeconds = 0.2;
+        static constexpr float  maxMixLawCorrectionDb = 3.0f; // +/-3dB, per spec
 
         // Per-strand processing chains.
         OnePoleLowPass lowPassA, lowPassB;

@@ -115,7 +115,7 @@ exceeds budget.
 | Mix | `mix` | 0 – 100% | 35% | Equal-power Dry/Wet |
 | Output | `output` | -12 – +6 dB | 0 dB | Final output trim |
 | Auto Gain | `autoGain` | on/off | **on** | Level-matches Wet to Dry so moving Mix does not change perceived loudness |
-| Stereo Preserve | `stereoPreserve` | 0 – 100% | **70%** (0% for projects saved before this parameter existed) | How much of the input's Mid/Side stereo image feeds the two strands and Core, instead of a shared Mid-only downmix. See below |
+| Stereo Preserve | `stereoPreserve` | 0 – 100% | **70%**, candidate pending listening (0% for projects saved before this parameter existed) | How much of the input's Side content is added back as a separate width "bed" alongside the strands. See below |
 
 When host tempo is unavailable while Sync is on, the plugin falls back
 safely to the free-running Rate knob rather than guessing a tempo.
@@ -127,29 +127,53 @@ single Mid downmix (`0.5 * (L + R)`), which meant a strongly anti-phase
 stereo source (`L ≈ -R`) collapsed the Wet signal toward silence, and a wide
 stereo source lost its left/right identity on the way in.
 
-`stereoPreserve` (`p`, 0-1) mixes each strand's source between that shared
-Mid and the input's own Mid/Side split:
+An earlier version of this parameter fixed that by feeding Strand A and
+Strand B directly from `M + p*S` and `M - p*S`. That kept the two strands
+exactly *geometrically* antipodal, but for an asymmetric input (e.g.
+L-only, or anything hard-panned) it could make one strand's *energy* far
+exceed the other's — so even though their positions stayed exactly
+opposite, the perceptually-weighted centre drifted toward whichever strand
+carried more signal. Measured at the shipped 70% default, an L-only input's
+energy-weighted centre bias reached 94% of the geometric radius — in
+practice, "one dancer, not two." See
+`docs/commercial-upgrade/decisions/ADR-004-stereo-preserve-bed.md` for the
+full derivation and measurements.
+
+The current design fixes this structurally instead of by degree: both
+strands and Core are **always** fed from Mid only, at any `stereoPreserve`
+value, so their energies are exactly equal by construction (not just on
+average) — the two strands' energy-weighted centre stays exactly on the
+geometric centre regardless of input, `stereoPreserve`, or Symmetry. Stereo
+width is restored by a separate, non-orbiting "bed" term instead:
 
 ```
 M = 0.5 * (L + R)
 S = 0.5 * (L - R)
-sourceA = M + p * S     // Strand A, and Core's left channel
-sourceB = M - p * S     // Strand B, and Core's right channel
+bedL =  p * S
+bedR = -p * S
+wetL = (strand A + strand B + Core, all Mid-fed) + bedL
+wetR = (strand A + strand B + Core, all Mid-fed) + bedR
 ```
 
-At `p = 0` this is exactly the old shared-Mid behaviour (including the
-anti-phase-collapses-to-silence case). At `p = 1`, Strand A is fed directly
-from L and Strand B from R. Mono input (`L == R`) is unaffected at any `p`,
-since Side is always 0.
+At `p = 0` the bed is silent, which is exactly the old shared-Mid behaviour
+(including the anti-phase-collapses-to-silence case, unchanged). Mono input
+(`L == R`) is unaffected at any `p`, since Side is always 0. Because
+`bedL + bedR == 0` identically, the bed alone can never worsen mono
+fold-down safety — measured across seven input conditions (dual mono,
+L-only, R-only, a 6 dB L/R difference, uncorrelated stereo, anti-phase, a
+wide pad), the mono-summed level stays within ~0.1% of its `p = 0` value at
+every `stereoPreserve` setting (see ADR-004; reproducible via
+`Tools/StereoPreserveAnalysis.cpp`, built with `-DDNA_ORBIT_BUILD_TOOLS=ON`).
 
 **Compatibility**: a project saved before this parameter existed (state
 schema 1) has no `stereoPreserve` node in its saved XML at all. Loading it
-forces `stereoPreserve` to 0% rather than the new 70% default, so the
-project reproduces its original sound exactly — see
-`Tests/BaselineRegressionTests.cpp` for the pinned numeric fingerprints and
-`docs/commercial-upgrade/decisions/ADR-003-stereo-preserve.md` for the full
-design rationale, including why the spec's proposed extra loudness-matching
-normalizer for this knob was deliberately left out of this phase.
+forces `stereoPreserve` to 0% rather than the new default, so the project
+reproduces its original sound exactly — see `Tests/BaselineRegressionTests.cpp`
+for the pinned numeric fingerprints (including a literal per-sample
+reference-buffer comparison) and ADR-004 for the full design rationale,
+including why the spec's proposed extra loudness-matching normalizer for
+this knob was deliberately left out, and why 70% is a candidate default
+pending real-material listening rather than a confirmed final value.
 
 ### Presets
 
@@ -313,14 +337,28 @@ built-in `UnitTest` framework:
 - **StereoPreserve** — 0% still collapses anti-phase input to silence
   (legacy path unaffected), above 0% keeps it audible, Wet level scales
   linearly with the parameter for anti-phase input, mono input is
-  unaffected at any value, 100% ties Strand/Core content to its originating
-  channel, and parameter automation is smoothed rather than stepped.
+  unaffected at any value, 100% ties the output to its originating channel,
+  parameter automation is smoothed rather than stepped, and — the Phase 2.5
+  re-verification (ADR-004) — L-only and R-only input produce an *identical*
+  Strand+Core contribution at every Stereo Preserve value (differing only by
+  the exact, predicted bed contribution), proving the energy-weighted centre
+  stays on the geometric centre rather than drifting toward whichever
+  strand an asymmetric input happens to favour.
 - **LevelMatch** — the 81-point Auto Gain sweep described above, Auto Gain
   off restoring the raw level, the correlation meter against known
   mono/inverted signals, and the RMS meter returning to zero on silence.
   Driven with pink noise rather than white: the Depth low-pass has unity DC
   gain but removes real energy from a broadband signal, and white noise
-  exaggerates that far beyond any real programme material.
+  exaggerates that far beyond any real programme material. Also: Auto Gain's
+  measured deviation across Stereo Preserve values (the bed is deliberately
+  uncompensated - see ADR-004), and that the correlation-aware Mix Law
+  removes the classic equal-power-law loudness bump at Mix 50% for strongly
+  correlated Dry/Wet.
+- **BaselineRegression** — schema-1 RMS/peak/checksum fingerprints for three
+  fixed signals, plus (following a request to distinguish "numerically
+  regression-compatible" from a literal claim of bit-for-bit equality) a
+  genuine sample-by-sample comparison against a literal reference buffer for
+  a short, fully deterministic scenario.
 - **Geometry** — that the helix's stored shape is identical at 0.02 Hz and
   4 Hz (measured difference: 0.0 rad), that `phi == pi` puts the centroid at
   zero for every stored sample (residual 1.7e-15, the floating-point floor),

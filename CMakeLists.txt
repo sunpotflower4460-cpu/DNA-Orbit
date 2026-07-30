@@ -131,4 +131,16 @@ if (DNA_ORBIT_BUILD_TOOLS)
         juce::juce_gui_basics
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
+
+    # Developer tool: prints Wet RMS/L-R balance/mono-sum/correlation for a
+    # fixed set of input conditions across Stereo Preserve values, using the
+    # real HelixEngine. Backs the measurements cited in
+    # docs/commercial-upgrade/decisions/ADR-004-stereo-preserve-bed.md.
+    add_executable(DNAOrbitStereoPreserveAnalysis Tools/StereoPreserveAnalysis.cpp)
+    target_include_directories(DNAOrbitStereoPreserveAnalysis PRIVATE Source)
+    target_link_libraries(DNAOrbitStereoPreserveAnalysis PRIVATE
+        DNAOrbit
+        juce::juce_audio_processors
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
 endif()

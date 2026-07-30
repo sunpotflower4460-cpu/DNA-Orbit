@@ -36,6 +36,11 @@ namespace dnaorbit::dsp
 
         resyncSamplesTotal = juce::jmax (1, (int) std::round (resyncDurationSeconds * sampleRate));
 
+        // Standard EMA envelope-follower coefficient: state moves toward the
+        // instantaneous value by a fraction (1 - coefficient) each sample, so
+        // it reaches ~63% of a step change after correlationTimeConstantSeconds.
+        corrCoefficient = (float) std::exp (-1.0 / (correlationTimeConstantSeconds * sampleRate));
+
         isPrepared = true;
         reset();
     }
@@ -75,6 +80,10 @@ namespace dnaorbit::dsp
         uiCorrelation.store (1.0f, std::memory_order_relaxed);
         uiPhaseA.store (0.0, std::memory_order_relaxed);
         uiPhi.store ((float) orbitmath::pi, std::memory_order_relaxed);
+
+        corrDryPowState = 0.0f;
+        corrWetPowState = 0.0f;
+        corrCrossState = 0.0f;
     }
 
     namespace
@@ -206,19 +215,32 @@ namespace dnaorbit::dsp
             const float dryL = sampleInL;
             const float dryR = sampleInR;
 
-            // --- Stereo Preserve: M/S source split for the two strands -----------
+            // --- Stereo Preserve: Mid orbit + a separate Side "bed" -------------
+            // Both strands and Core are fed from Mid ONLY, always - never from
+            // L/R directly - so the orbit's energy is always exactly balanced
+            // between Strand A and Strand B, whatever the input's L/R balance
+            // is. (An earlier version fed sourceA = M + p*S, sourceB = M - p*S
+            // directly: geometrically antipodal, but for an asymmetric input
+            // such as L-only, Strand A could carry far more energy than
+            // Strand B, so the *perceptual* centre drifted toward Strand A
+            // even though the two strands' *positions* stayed exactly
+            // opposite. See ADR-004 for the measurements that led here.)
+            // The input's Side content is instead added back as a separate,
+            // non-orbiting bed at amount stereoPreserve, restoring width and
+            // fixing anti-phase collapse-to-silence without coupling either
+            // strand's loudness to the input's L/R balance.
+            //
             // mid/side of a mono-duplicated input (stereoIn == false) always
-            // gives side == 0, so sourceA == sourceB == mid regardless of
-            // stereoPreserve - mono input is unaffected by this parameter.
-            // At stereoPreserve == 0, sourceA == sourceB == mid for ANY input,
-            // which is exactly the old shared-mono-downmix Wet source: this is
-            // what makes stereoPreserve == 0 reproduce the schema-1 sound
-            // (including anti-phase input collapsing Wet to silence), see
-            // Tests/BaselineRegressionTests.cpp.
+            // gives side == 0, so the bed is silent and mono input is
+            // unaffected by this parameter. At stereoPreserve == 0 the bed
+            // contributes nothing at all, which is exactly the old shared-
+            // mono-downmix Wet source: this is what makes stereoPreserve == 0
+            // reproduce the schema-1 sound (including anti-phase input
+            // collapsing Wet to silence), see Tests/BaselineRegressionTests.cpp.
             const float mid  = stereoIn ? 0.5f * (sampleInL + sampleInR) : sampleInL;
             const float side = stereoIn ? 0.5f * (sampleInL - sampleInR) : 0.0f;
-            const float sourceA = mid + stereoPreserve * side;
-            const float sourceB = mid - stereoPreserve * side;
+            const float bedL = stereoPreserve * side;
+            const float bedR = -stereoPreserve * side;
 
             // --- Orbit angle update -------------------------------------------------
             const double incA = orbitmath::angularIncrement ((double) rateHz, sampleRate);
@@ -276,7 +298,7 @@ namespace dnaorbit::dsp
             const float backGainA = dbToGain (gainDbA);
             const float cutoffA = frontCutoffHz + (backCutoffHz - frontCutoffHz) * (float) backAmountA * depth;
             lowPassA.setCutoffHz (cutoffA);
-            const float filteredA = lowPassA.processSample (sourceA * backGainA);
+            const float filteredA = lowPassA.processSample (mid * backGainA);
 
             const float backDelayMsA = maxBackDelayMs * (float) backAmountA * depth;
             const float delaySamplesA = std::clamp ((backDelayMsA * 0.001f) * (float) sampleRate, 0.0f, maxDelaySamplesStored - 1.0f);
@@ -295,7 +317,7 @@ namespace dnaorbit::dsp
             const float backGainB = dbToGain (gainDbB);
             const float cutoffB = frontCutoffHz + (backCutoffHz - frontCutoffHz) * (float) backAmountB * depth;
             lowPassB.setCutoffHz (cutoffB);
-            const float filteredB = lowPassB.processSample (sourceB * backGainB);
+            const float filteredB = lowPassB.processSample (mid * backGainB);
 
             const float backDelayMsB = maxBackDelayMs * (float) backAmountB * depth;
             const float delaySamplesB = std::clamp (((backDelayMsB + twistMs) * 0.001f) * (float) sampleRate, 0.0f, maxDelaySamplesStored - 1.0f);
@@ -308,16 +330,22 @@ namespace dnaorbit::dsp
             const float strandBL = delayedB * (float) gainsB.left * strandGain;
             const float strandBR = delayedB * (float) gainsB.right * strandGain;
 
-            // --- Wet sum, Core, NULL CORE --------------------------------------------
+            // --- Wet sum, Core, Stereo Preserve bed, NULL CORE ------------------------
             float wetL = strandAL + strandBL;
             float wetR = strandAR + strandBR;
 
-            // Core follows Stereo Preserve too: lerp(mid, L, stereoPreserve) is
-            // exactly sourceA (and lerp(mid, R, stereoPreserve) is sourceB), so
-            // Core's image width matches the strands' rather than always being
-            // a mono blob re-duplicated to both channels.
-            wetL += sourceA * core;
-            wetR += sourceB * core;
+            // Core stays Mid-based like the strands - a stable, always-
+            // balanced anchor at the centre, consistent with the orbit.
+            wetL += mid * core;
+            wetR += mid * core;
+
+            // The Stereo Preserve bed is added after Core, before NULL CORE,
+            // so "NULL CORE removes Wet's Mid component" still applies to the
+            // combined signal as one thing, rather than needing special-
+            // casing for a term that is already Side-only (and so already
+            // mono-safe: L + R of a pure Side signal is 0 by construction).
+            wetL += bedL;
+            wetR += bedR;
 
             const auto nulled = nullCoreProcess (wetL, wetR);
             wetL += (nulled.left  - wetL) * nullCoreAmount;
@@ -367,14 +395,72 @@ namespace dnaorbit::dsp
             // NULL CORE is deliberately NOT compensated: that mode is meant to be able
             // to almost vanish in mono, and for near-mono material the required boost
             // would be unbounded. The clamp above is the safety net.
+            //
+            // This formula only ever assumed Strand A/B/Core were coherent
+            // copies of the SAME source at different delays - which, since
+            // both strands and Core are always fed from Mid (see the Stereo
+            // Preserve comment above), remains exactly true for any
+            // stereoPreserve value, not just 0. The Stereo Preserve bed
+            // (bedL/bedR) is deliberately NOT included in this prediction:
+            // its power relative to Mid's depends on the input's actual
+            // Mid/Side energy ratio, which this formula cannot know without
+            // becoming signal-adaptive (and risking the pumping this
+            // deterministic design exists to avoid) - see ADR-004.
             const float wetMakeup = 1.0f + (makeupTarget - 1.0f) * autoGainAmount;
             wetL *= wetMakeup;
             wetR *= wetMakeup;
 
+            // --- Correlation-aware Mix Law ---------------------------------------------
+            // The equal-power Dry/Wet law below is calibrated for UNCORRELATED
+            // Dry/Wet: gD^2 + gW^2 == 1 always, so two uncorrelated unit-power
+            // signals blended by it sum to unit power at every Mix setting.
+            // When Dry and Wet are actually correlated (e.g. high Core, low
+            // Radius/Depth - Wet resembles Dry), the same law lets them add
+            // partially in AMPLITUDE instead of power, which is louder than
+            // unit power - audible as a loudness bump around Mix 50% that
+            // grows with how correlated Dry and Wet are. Slowly tracking that
+            // correlation and cancelling exactly the resulting power error
+            // removes the bump without touching Mix 0% or 100% (see the
+            // derivation below).
+            const float dryPowInst = dryL * dryL + dryR * dryR;
+            const float wetPowInst = wetL * wetL + wetR * wetR;
+            const float crossInst  = dryL * wetL + dryR * wetR;
+
+            corrDryPowState = dryPowInst + corrCoefficient * (corrDryPowState - dryPowInst);
+            corrWetPowState = wetPowInst + corrCoefficient * (corrWetPowState - wetPowInst);
+            corrCrossState  = crossInst  + corrCoefficient * (corrCrossState  - crossInst);
+
+            const float corrDenom = std::sqrt (std::max (corrDryPowState * corrWetPowState, 0.0f));
+            // Undefined when either side is silent - 0 (uncorrelated) is the
+            // safe fallback: predictedPower below reduces to gD^2 + gW^2 == 1,
+            // i.e. exactly the existing equal-power law, so this feature is a
+            // no-op whenever there is nothing (yet) to estimate a correlation from.
+            const float rho = corrDenom > 1.0e-9f
+                             ? std::clamp (corrCrossState / corrDenom, -1.0f, 1.0f)
+                             : 0.0f;
+
             // --- Dry/Wet mix, output gain ---------------------------------------------
             const auto dryWet = equalPowerMix (mix);
-            float finalL = dryWet.dry * dryL + dryWet.wet * wetL;
-            float finalR = dryWet.dry * dryR + dryWet.wet * wetR;
+
+            // predictedPower == 1 whenever gD == 0 or gW == 0, i.e. at Mix
+            // 0% or 100% - so this correction is exactly a no-op at both
+            // extremes, regardless of rho, which is what keeps "Mix 0% ==
+            // Dry" and the NULL CORE / mono-cancellation invariants exact.
+            const float predictedPower = dryWet.dry * dryWet.dry + dryWet.wet * dryWet.wet
+                                        + 2.0f * rho * dryWet.dry * dryWet.wet;
+            const float maxMixLawGain = dbToGain (maxMixLawCorrectionDb);
+            const float mixLawNormalizer = predictedPower > 1.0e-9f
+                                          ? std::clamp (1.0f / std::sqrt (predictedPower),
+                                                        1.0f / maxMixLawGain, maxMixLawGain)
+                                          : 1.0f;
+            // Gated by the same Auto Gain toggle as the Wet makeup above - one
+            // "keep loudness consistent" switch from the user's perspective,
+            // rather than a second parameter (see Parameters.h §13 guidance
+            // against proliferating IDs).
+            const float mixLawGain = 1.0f + (mixLawNormalizer - 1.0f) * autoGainAmount;
+
+            float finalL = mixLawGain * (dryWet.dry * dryL + dryWet.wet * wetL);
+            float finalR = mixLawGain * (dryWet.dry * dryR + dryWet.wet * wetR);
 
             finalL *= outGain;
             finalR *= outGain;

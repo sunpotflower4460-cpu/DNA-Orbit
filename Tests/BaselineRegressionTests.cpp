@@ -8,8 +8,18 @@ using namespace dnaorbit::dsp;
  * behaviour, captured before the Stereo Preserve rewrite (commercial upgrade
  * Phase 2). These are regression pins, not behaviour specs: once Phase 2
  * lands, running the same signals with stereoPreserve=0 must reproduce these
- * exact numbers, proving the legacy/migrated path is bit-for-bit unchanged
- * for anyone reloading a project saved before Stereo Preserve existed.
+ * exact numbers, proving the legacy/migrated path is NUMERICALLY REGRESSION
+ * COMPATIBLE - matching RMS/peak/checksum within a tight tolerance - for
+ * anyone reloading a project saved before Stereo Preserve existed.
+ *
+ * This is deliberately not phrased as "bit-for-bit identical": the
+ * fingerprint here is RMS/peak plus a position-weighted checksum, not a
+ * sample-by-sample comparison, so it could in principle miss two errors that
+ * happen to cancel in that aggregate (astronomically unlikely for a real DSP
+ * bug, but a genuine gap "bit-for-bit" would overclaim). For a real
+ * sample-by-sample guarantee, see "Schema-1 legacy path matches a literal
+ * per-sample reference buffer" below, which pins every sample of a short
+ * buffer explicitly instead of an aggregate.
  *
  * If Phase 2 intentionally changes the stereoPreserve=0 path, these numbers
  * must be re-derived deliberately (see docs/commercial-upgrade/09_decision
@@ -139,6 +149,62 @@ namespace
                                             "Schema 1: anti-phase stereo input collapses Wet to exact silence (L)");
                 expectWithinAbsoluteError (actual.rmsR, 0.0, 1.0e-6,
                                             "Schema 1: anti-phase stereo input collapses Wet to exact silence (R)");
+            }
+
+            beginTest ("Schema-1 legacy path matches a literal per-sample reference buffer (a genuine bit-for-bit pin)");
+            {
+                // Unlike the RMS/peak/checksum fingerprints above, this pins
+                // every sample of a short buffer explicitly - a real
+                // bit-for-bit (well, float-for-float) comparison, not an
+                // aggregate that could in principle miss a cancelling error.
+                // A fresh engine's first block is fully deterministic (no
+                // prior random-noise warm-up history to depend on), which is
+                // what makes a literal per-sample reference practical here.
+                HelixEngine engine;
+                engine.prepare (kSampleRate, 8, 2);
+
+                HelixEngine::Parameters p;
+                p.rateHz = 0.3f;
+                p.radius01 = 0.8f;
+                p.depth01 = 0.55f;
+                p.symmetry01 = 1.0f;
+                p.twistMs = 5.0f;
+                p.core01 = 0.1f;
+                p.mix01 = 1.0f;
+                p.outputDb = 0.0f;
+                p.autoGain = true;
+                p.stereoPreserve01 = 0.0f;
+                engine.primeParameters (p);
+                engine.setParameters (p);
+
+                juce::AudioBuffer<float> buffer (2, 8);
+                for (int n = 0; n < 8; ++n)
+                {
+                    const float s = 0.4f * (float) std::sin (juce::MathConstants<double>::twoPi * 220.0 * n / kSampleRate);
+                    buffer.setSample (0, n, s);
+                    buffer.setSample (1, n, s);
+                }
+
+                engine.process (buffer, 2);
+
+                // Captured from the actual current implementation - see class
+                // comment. Re-derive deliberately, never to silence a failure.
+                const float expectedL[8] = {
+                    0.0f,        0.00884873f, 0.0182521f, 0.0276867f,
+                    0.0371019f,  0.0464863f,  0.0558317f, 0.0651306f
+                };
+                const float expectedR[8] = {
+                    0.0f,        0.0088494f, 0.0182542f, 0.0276909f,
+                    0.037109f,   0.0464969f, 0.0558467f, 0.0651506f
+                };
+
+                for (int n = 0; n < 8; ++n)
+                {
+                    expectWithinAbsoluteError (buffer.getSample (0, n), expectedL[n], 1.0e-5f,
+                                                "sample " + juce::String (n) + " L");
+                    expectWithinAbsoluteError (buffer.getSample (1, n), expectedR[n], 1.0e-5f,
+                                                "sample " + juce::String (n) + " R");
+                }
             }
         }
     };

@@ -30,14 +30,20 @@ namespace dnaorbit::params
      *
      *   1 - baseline: the 12 parameters above, Wet built from a mono (M-only)
      *       downmix, no stereo-preserving source model.
-     *   2 - adds Stereo Preserve (stereoPreserveID): Wet's per-strand source
-     *       becomes M +/- p*S instead of a shared mono M downmix, fixing
-     *       anti-phase stereo input collapsing Wet to silence. A schema-1
-     *       save has no stereoPreserve PARAM node at all (it didn't exist
-     *       yet), so it is force-set to 0 on load to exactly reproduce the
-     *       schema-1 sound (see PluginProcessor::setStateInformation and
-     *       Tests/BaselineRegressionTests.cpp). A genuinely fresh instance
-     *       (nothing loaded) gets the parameter's declared default instead.
+     *   2 - adds Stereo Preserve (stereoPreserveID): the two strands and
+     *       Core stay fed from a shared Mid downmix (as in schema 1) at any
+     *       value, but the input's Side content is additionally injected as
+     *       a separate, non-orbiting "bed" scaled by this parameter, fixing
+     *       anti-phase stereo input collapsing Wet to silence without
+     *       coupling either strand's loudness to the input's L/R balance
+     *       (see HelixEngine::process() and
+     *       docs/commercial-upgrade/decisions/ADR-004-stereo-preserve-bed.md).
+     *       A schema-1 save has no stereoPreserve PARAM node at all (it
+     *       didn't exist yet), so it is force-set to 0 on load to exactly
+     *       reproduce the schema-1 sound (see PluginProcessor::setStateInformation
+     *       and Tests/BaselineRegressionTests.cpp). A genuinely fresh
+     *       instance (nothing loaded) gets the parameter's declared default
+     *       instead.
      *
      * Bump this whenever a new schema version changes how a *missing* schema
      * property (i.e. a project saved by an older build) should be

@@ -69,16 +69,41 @@ real vocal/pad/guitar material. Nothing here substitutes automated DSP tests
 (which do run, and do check the numeric claims — e.g. anti-phase no longer
 silencing Wet, Mix-sweep RMS deviation bounds) for actually listening.
 
-- **Stereo Preserve perceived loudness** (see `docs/commercial-upgrade/decisions/ADR-003-stereo-preserve.md`):
-  Phase 2 added the `stereoPreserve` parameter (default 70% for new
-  instances) so anti-phase and wide stereo input no longer collapse Wet
-  toward silence. The spec's proposed extra loudness-matching normalizer for
-  this specific knob was deliberately NOT implemented (it would have
-  conflicted with the schema-1 byte-identical-legacy requirement at its
-  literal values). If real listening finds moving Stereo Preserve noticeably
-  changes perceived Wet loudness, ADR-003 already has a concrete fallback
-  design (a relative normalizer anchored to 0 dB at 0%) ready to implement
-  as ADR-004.
+- **Stereo Preserve default (70%) and high-value character** (see
+  `docs/commercial-upgrade/decisions/ADR-004-stereo-preserve-bed.md`, which
+  supersedes ADR-003's now-abandoned design): Phase 2.5 re-verified Stereo
+  Preserve's physics and found the original `sourceA = M+p*S`/`sourceB = M-p*S`
+  design could bias the *energy-weighted* centre toward one strand for
+  asymmetric input (e.g. L-only) even though the two strands stayed exactly
+  antipodal in *position* — up to 94% of the geometric radius at the shipped
+  70% default for hard-panned material. The current design (both strands
+  always Mid-fed, Side content added as a separate non-orbiting "bed")
+  eliminates that by construction, verified in
+  `Tests/StereoPreserveTests.cpp`. Two things still need real ears rather
+  than automated tests:
+  1. **70% is a candidate, not a confirmed final default.** Pick the value
+     via `08_手動試聴_DAW検証仕様書.md` across real vocal/pad/guitar
+     material, then update `Parameters.h`'s `stereoPreserveDefaultPercent`
+     deliberately (with a commit explaining the listening result), not by
+     guessing further.
+  2. **High Stereo Preserve values (especially with hard-panned or very
+     wide/uncorrelated source material) measurably push the output
+     correlation strongly negative** (see ADR-004's measurement table -
+     down to roughly -0.7 to -0.9 for L-only material at 70-100%). This is
+     the input's own Side content being passed through, not synthesized
+     decorrelation, and the mono-summed level stays essentially unaffected
+     (also measured), but whether it *sounds* natural/wide versus
+     unnaturally phasey at high settings needs a listening judgement this
+     environment cannot make.
+  3. The spec's proposed extra loudness-matching normalizer for this knob
+     (independent of the above) was deliberately NOT implemented, for the
+     reasons in ADR-003/ADR-004 (conflict with schema-1 numerical-regression
+     compatibility at the spec's literal values). If real listening finds
+     moving Stereo Preserve noticeably changes perceived Wet loudness,
+     ADR-003 already has a concrete fallback design (a relative normalizer
+     anchored to 0 dB at 0%) ready to implement as a future ADR.
+  `Tools/StereoPreserveAnalysis.cpp` (build with `-DDNA_ORBIT_BUILD_TOOLS=ON`)
+  reproduces the numeric measurements cited in ADR-004 on demand.
 
 - **Bypass toggle audibility** (see `docs/commercial-upgrade/decisions/ADR-001-bypass-continuity.md`):
   Phase 1 fixed the engine's internal state freezing during bypass (orbit
