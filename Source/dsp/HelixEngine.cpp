@@ -8,7 +8,7 @@ namespace dnaorbit::dsp
 
         const double smoothParamSeconds = 0.05;   // 50 ms for standard parameters
         const double nullCoreSeconds    = 0.12;   // 120 ms mode-switch crossfade
-        const double softBypassSeconds  = 0.03;   // 30 ms Soft Bypass crossfade (ADR-008)
+        const double softBypassSeconds  = 0.03;   // 30 ms Soft Bypass / Mono Preview crossfade (ADR-008/009)
 
         radiusSmoothed.reset (sampleRate, smoothParamSeconds);
         depthSmoothed.reset (sampleRate, smoothParamSeconds);
@@ -22,6 +22,7 @@ namespace dnaorbit::dsp
         autoGainAmountSmoothed.reset (sampleRate, nullCoreSeconds);
         stereoPreserveSmoothed.reset (sampleRate, smoothParamSeconds);
         softBypassSmoothed.reset (sampleRate, softBypassSeconds);
+        monoPreviewSmoothed.reset (sampleRate, softBypassSeconds);
 
         lowPassA.prepare (sampleRate);
         lowPassB.prepare (sampleRate);
@@ -81,6 +82,7 @@ namespace dnaorbit::dsp
         autoGainAmountSmoothed.setCurrentAndTargetValue (autoGainAmountSmoothed.getCurrentValue());
         stereoPreserveSmoothed.setCurrentAndTargetValue (stereoPreserveSmoothed.getCurrentValue());
         softBypassSmoothed.setCurrentAndTargetValue (softBypassSmoothed.getCurrentValue());
+        monoPreviewSmoothed.setCurrentAndTargetValue (monoPreviewSmoothed.getCurrentValue());
 
         uiThetaA.store (0.0f, std::memory_order_relaxed);
         uiThetaB.store ((float) orbitmath::pi, std::memory_order_relaxed);
@@ -185,6 +187,7 @@ namespace dnaorbit::dsp
         const float nullCoreAmount = p.nullCore ? 1.0f : 0.0f;
         const float outputGain = dbToGain (outputDb);
         const float softBypassAmount = p.softBypass ? 1.0f : 0.0f;
+        const float monoPreviewAmount = p.monoPreview ? 1.0f : 0.0f;
 
         if (snapImmediately)
         {
@@ -205,6 +208,7 @@ namespace dnaorbit::dsp
             nullCoreMixSmoothed.setCurrentAndTargetValue (nullCoreAmount);
             stereoPreserveSmoothed.setCurrentAndTargetValue (stereoPreserve01);
             softBypassSmoothed.setCurrentAndTargetValue (softBypassAmount);
+            monoPreviewSmoothed.setCurrentAndTargetValue (monoPreviewAmount);
         }
         else
         {
@@ -220,6 +224,7 @@ namespace dnaorbit::dsp
             nullCoreMixSmoothed.setTargetValue (nullCoreAmount);
             stereoPreserveSmoothed.setTargetValue (stereoPreserve01);
             softBypassSmoothed.setTargetValue (softBypassAmount);
+            monoPreviewSmoothed.setTargetValue (monoPreviewAmount);
         }
 
         uiNullCoreOn.store (p.nullCore, std::memory_order_relaxed);
@@ -304,6 +309,7 @@ namespace dnaorbit::dsp
             const float autoGainAmount = autoGainAmountSmoothed.getNextValue();
             const float stereoPreserve = stereoPreserveSmoothed.getNextValue();
             const float softBypassAmt = softBypassSmoothed.getNextValue();
+            const float monoPreviewAmt = monoPreviewSmoothed.getNextValue();
 
             // Sanitized at the single point audio enters the engine: the two
             // one-pole filters below are recursive (state depends on the
@@ -612,6 +618,16 @@ namespace dnaorbit::dsp
             // scratch path - see ADR-008.
             finalL += (dryL - finalL) * softBypassAmt;
             finalR += (dryR - finalR) * softBypassAmt;
+
+            // --- Mono Preview: fold the finished output down to mono -----------
+            // Deliberately after Soft Bypass, not before, so Mono Preview
+            // previews whatever is actually being heard right now (the
+            // processed signal, or Dry if also bypassed) rather than always
+            // previewing the processed signal regardless of Bypass state.
+            // A monitoring utility only - see ADR-009.
+            const float monoSum = 0.5f * (finalL + finalR);
+            finalL += (monoSum - finalL) * monoPreviewAmt;
+            finalR += (monoSum - finalR) * monoPreviewAmt;
 
             constexpr float antiDenormal = 1.0e-20f;
             finalL += antiDenormal; finalL -= antiDenormal;

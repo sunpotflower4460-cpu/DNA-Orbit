@@ -187,6 +187,30 @@ silencing Wet, Mix-sweep RMS deviation bounds) for actually listening.
      confusing. If real usage shows confusion, the tooltip wording and/or
      button placement is the first thing to revisit.
 
+- **Mono Preview real-ear check** (see
+  `docs/commercial-upgrade/decisions/ADR-009-ui-ux-batch.md`): the mono
+  fold-down math and its 30ms ramp are verified numerically in
+  `Tests/MonoPreviewTests.cpp`, but whether it is actually useful as a
+  mono-compatibility check on real, wide-stereo/Stereo-Preserve-heavy
+  material (does it clearly reveal cancellation the way engineers expect
+  from this kind of utility) needs a real listening session.
+
+- **Undo/Redo end-to-end in a real host** (see
+  `docs/commercial-upgrade/decisions/ADR-009-ui-ux-batch.md`): the
+  Undo/Redo mechanism itself (a single parameter change, a multi-parameter
+  transaction, `Presets::apply`'s one-transaction-per-preset behaviour) is
+  verified in `Tests/UndoRedoTests.cpp` by driving APVTS's ValueTree
+  directly, because this headless container's test runner has no message
+  loop to pump (`JUCE_MODAL_LOOPS_PERMITTED` is off for plugin targets, so
+  `MessageManager::runDispatchLoopUntil()` isn't available) and
+  AudioProcessorValueTreeState only mirrors parameter changes into that
+  ValueTree - the thing Undo/Redo actually records - via its own internal
+  ~10Hz timer. In other words: the *mechanism* is tested, but the full path
+  from "drag a knob in a real DAW" through to "Ctrl+Z undoes it" has not
+  been exercised end-to-end. Also unverified: whether the host's own
+  Ctrl+Z (if any) conflicts or interacts oddly with the plugin window's
+  Ctrl+Z when the plugin editor has keyboard focus, across different hosts.
+
 ## Signing, notarization, installers
 
 - macOS: Developer ID Application signing, Hardened Runtime, notarization

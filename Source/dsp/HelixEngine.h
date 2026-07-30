@@ -136,6 +136,14 @@ namespace dnaorbit::dsp
              * softBypassSmoothed and ADR-008.
              */
             bool softBypass = false;
+
+            /**
+             * Monitoring-only: folds the finished output (applied after
+             * Soft Bypass, so it previews whatever is actually being heard)
+             * down to mono. false (default) leaves output untouched - no
+             * schema bump needed. See monoPreviewSmoothed and ADR-009.
+             */
+            bool monoPreview = false;
         };
 
         void prepare (double newSampleRate, int maximumBlockSize, int maxChannelsHint);
@@ -246,6 +254,8 @@ namespace dnaorbit::dsp
         juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> stereoPreserveSmoothed;
         /** 0 = normal processing, 1 = fully crossfaded to dry. ~30ms ramp. */
         juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> softBypassSmoothed;
+        /** 0 = normal stereo, 1 = fully folded to mono. ~30ms ramp. */
+        juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> monoPreviewSmoothed;
 
         bool  nullCoreTarget = false;
 

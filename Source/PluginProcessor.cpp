@@ -35,7 +35,7 @@ DNAOrbitAudioProcessor::DNAOrbitAudioProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
                           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
-      apvts (*this, nullptr, "PARAMETERS", dnaorbit::params::createParameterLayout())
+      apvts (*this, &undoManager, "PARAMETERS", dnaorbit::params::createParameterLayout())
 {
     rateHzParam   = apvts.getRawParameterValue (dnaorbit::params::rateID);
     syncParam     = apvts.getRawParameterValue (dnaorbit::params::syncID);
@@ -56,6 +56,7 @@ DNAOrbitAudioProcessor::DNAOrbitAudioProcessor()
     startPhaseParam     = apvts.getRawParameterValue (dnaorbit::params::startPhaseID);
     directionParam      = apvts.getRawParameterValue (dnaorbit::params::directionID);
     softBypassParam     = apvts.getRawParameterValue (dnaorbit::params::softBypassID);
+    monoPreviewParam    = apvts.getRawParameterValue (dnaorbit::params::monoPreviewID);
 }
 
 void DNAOrbitAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
@@ -169,6 +170,7 @@ dnaorbit::dsp::HelixEngine::Parameters DNAOrbitAudioProcessor::currentParameterS
     }
 
     p.softBypass = softBypassParam->load() > 0.5f;
+    p.monoPreview = monoPreviewParam->load() > 0.5f;
 
     return p;
 }

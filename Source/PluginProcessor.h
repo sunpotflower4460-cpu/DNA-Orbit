@@ -39,6 +39,11 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
+    // Declared before apvts (construction order follows declaration order):
+    // apvts takes a pointer to this so every parameter change becomes a
+    // single undoable transaction, giving the editor's Undo/Redo buttons
+    // host-independent Ctrl+Z/Ctrl+Shift+Z without any extra bookkeeping.
+    juce::UndoManager undoManager;
     juce::AudioProcessorValueTreeState apvts;
 
     dnaorbit::dsp::HelixEngine& getEngine() noexcept { return engine; }
@@ -83,6 +88,7 @@ private:
     std::atomic<float>* startPhaseParam     = nullptr;
     std::atomic<float>* directionParam      = nullptr;
     std::atomic<float>* softBypassParam     = nullptr;
+    std::atomic<float>* monoPreviewParam    = nullptr;
 
     int loadedSchemaVersion = dnaorbit::params::currentStateSchemaVersion;
 

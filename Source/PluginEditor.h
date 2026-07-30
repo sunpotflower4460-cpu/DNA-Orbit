@@ -14,6 +14,7 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    bool keyPressed (const juce::KeyPress&) override;
 
 private:
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
@@ -60,9 +61,10 @@ private:
     juce::TextButton revertButton;
 
     // Always visible (both tabs), in the top bar: an in-plugin Soft Bypass,
-    // independent of the host's own Bypass. See ADR-008.
-    juce::ToggleButton bypassButton;
-    std::unique_ptr<ButtonAttachment> bypassAttachment;
+    // independent of the host's own Bypass (ADR-008), and a Mono Preview
+    // monitoring toggle (ADR-009).
+    juce::ToggleButton bypassButton, monoPreviewButton;
+    std::unique_ptr<ButtonAttachment> bypassAttachment, monoPreviewAttachment;
 
     // Tracks which factory preset (if any) is active, so the UI can show a
     // "Modified" state once the user nudges anything and offer Revert.

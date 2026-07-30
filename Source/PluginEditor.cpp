@@ -31,6 +31,7 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
     subtitleLabel.setFont (japaneseFont (11.0f));
     subtitleLabel.setColour (juce::Label::textColourId,
                              dnaorbit::ui::DnaLookAndFeel::textColour().withAlpha (0.6f));
+    subtitleLabel.setTooltip (jp("Ctrl+Z(macではCmd+Z)で元に戻す、Ctrl+Shift+Zでやり直せます。"));
     addAndMakeVisible (subtitleLabel);
 
     addAndMakeVisible (helixView);
@@ -85,6 +86,12 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
                              + jp("軌道の位相は裏側で回り続けるので、解除しても不自然な段差は出ません。"));
     addAndMakeVisible (bypassButton);
     bypassAttachment = std::make_unique<ButtonAttachment> (processorRef.apvts, params::softBypassID, bypassButton);
+
+    monoPreviewButton.setButtonText (jp("モノ確認"));
+    monoPreviewButton.setTooltip (jp("最終出力をモノラルに折り畳んで試聴します(モニター専用)。")
+                                  + jp("約30msでなめらかに切り替わります。左右の打ち消しがないか確認するのに使います。"));
+    addAndMakeVisible (monoPreviewButton);
+    monoPreviewAttachment = std::make_unique<ButtonAttachment> (processorRef.apvts, params::monoPreviewID, monoPreviewButton);
 
     // --- Basic page knobs -------------------------------------------------------
     setUpKnob (rateKnob, params::rateID, jp("速さ"), jp("1周する時間"),
@@ -215,6 +222,13 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
     setSize (juce::jlimit (780, 1600, savedWidth), juce::jlimit (540, 1100, savedHeight));
 
     startTimerHz (12);
+
+    // Ctrl+Z / Ctrl+Shift+Z (Cmd on macOS, via commandModifier) for
+    // Undo/Redo - see keyPressed() and the undoManager member on
+    // DNAOrbitAudioProcessor. Key events bubble up from whichever child has
+    // focus to this top-level component if unhandled, so this alone is
+    // enough without wiring every individual control.
+    setWantsKeyboardFocus (true);
 }
 
 DNAOrbitAudioProcessorEditor::~DNAOrbitAudioProcessorEditor()
@@ -250,7 +264,8 @@ void DNAOrbitAudioProcessorEditor::setUpKnob (Knob& knob, const juce::String& pa
 
 void DNAOrbitAudioProcessorEditor::applyPreset (int presetIndex)
 {
-    dnaorbit::presets::apply (processorRef.apvts, dnaorbit::presets::presets[presetIndex]);
+    dnaorbit::presets::apply (processorRef.apvts, dnaorbit::presets::presets[presetIndex],
+                              &processorRef.undoManager);
     currentPresetIndex = presetIndex;
 }
 
@@ -298,6 +313,24 @@ void DNAOrbitAudioProcessorEditor::showPage (int page)
 
     resized();
     repaint();
+}
+
+bool DNAOrbitAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
+{
+    if (key == juce::KeyPress ('z', juce::ModifierKeys::commandModifier, 0))
+    {
+        processorRef.undoManager.undo();
+        return true;
+    }
+
+    if (key == juce::KeyPress ('z', juce::ModifierKeys::commandModifier | juce::ModifierKeys::shiftModifier, 0)
+        || key == juce::KeyPress ('y', juce::ModifierKeys::commandModifier, 0))
+    {
+        processorRef.undoManager.redo();
+        return true;
+    }
+
+    return false;
 }
 
 void DNAOrbitAudioProcessorEditor::timerCallback()
@@ -377,7 +410,7 @@ void DNAOrbitAudioProcessorEditor::resized()
 
     // --- Top bar ---------------------------------------------------------------
     auto topBar = area.removeFromTop (44);
-    auto titleArea = topBar.removeFromLeft (250);
+    auto titleArea = topBar.removeFromLeft (220);
     titleLabel.setBounds (titleArea.removeFromTop (24));
     subtitleLabel.setBounds (titleArea);
 
@@ -386,7 +419,7 @@ void DNAOrbitAudioProcessorEditor::resized()
     tabArea.removeFromLeft (4);
     detailTabButton.setBounds (tabArea.removeFromLeft (66));
 
-    auto presetArea = topBar.removeFromRight (350).reduced (0, 9);
+    auto presetArea = topBar.removeFromRight (320).reduced (0, 9);
     revertButton.setBounds (presetArea.removeFromRight (58));
     presetArea.removeFromRight (6);
     presetLabel.setBounds (presetArea.removeFromLeft (74));
@@ -394,9 +427,11 @@ void DNAOrbitAudioProcessorEditor::resized()
     presetBox.setBounds (presetArea);
 
     // Whatever remains of topBar (between the tabs and the preset menu) is
-    // the Soft Bypass toggle - visible on both pages since it is a
-    // top-level, always-relevant control.
-    bypassButton.setBounds (topBar.reduced (4, 9));
+    // the Soft Bypass / Mono Preview toggles - visible on both pages since
+    // they are top-level, always-relevant controls.
+    auto utilityArea = topBar.reduced (4, 9);
+    bypassButton.setBounds (utilityArea.removeFromLeft (utilityArea.getWidth() / 2));
+    monoPreviewButton.setBounds (utilityArea);
 
     // --- Control area ----------------------------------------------------------
     auto controlArea = area.removeFromBottom (152).reduced (8);

@@ -28,6 +28,7 @@ namespace dnaorbit::params
     inline constexpr const char* startPhaseID     = "startPhase";
     inline constexpr const char* directionID      = "direction";
     inline constexpr const char* softBypassID     = "softBypass";
+    inline constexpr const char* monoPreviewID    = "monoPreview";
 
     /**
      * State schema version, stored as a property on apvts.state (alongside
@@ -319,6 +320,13 @@ namespace dnaorbit::params
         // well a given host automates/announces its own Bypass.
         paramList.push_back (std::make_unique<juce::AudioParameterBool> (
             juce::ParameterID { softBypassID, 1 }, "Soft Bypass", false));
+
+        // Monitoring-only utility: folds the finished output (post Soft
+        // Bypass, so it previews whatever is actually being heard) down to
+        // mono, for checking mono-compatibility. Off (default) leaves
+        // output untouched - no schema bump needed. See ADR-009.
+        paramList.push_back (std::make_unique<juce::AudioParameterBool> (
+            juce::ParameterID { monoPreviewID, 1 }, "Mono Preview", false));
 
         return { paramList.begin(), paramList.end() };
     }

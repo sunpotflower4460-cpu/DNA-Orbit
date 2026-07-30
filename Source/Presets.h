@@ -42,28 +42,41 @@ namespace dnaorbit::presets
         int   phaseMode;
         float startPhaseDeg;
         bool  clockwise;
-        // Every factory preset applies with Soft Bypass off. Picking a
-        // preset is meant to audition its sound, never to silently leave
-        // you bypassed.
+        // Every factory preset applies with Soft Bypass off and Mono
+        // Preview off. Picking a preset is meant to audition its sound,
+        // never to silently leave you bypassed or monitoring in mono.
         bool  softBypass;
+        bool  monoPreview;
     };
 
     inline const Preset presets[] = {
-        { "ボーカルを広げる", 0.10f, false, 2,  75.0f, 45.0f, 100.0f, 4.0f, 10.0f, false, 30.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true, false },
-        { "パッドを回す",     0.18f, false, 2, 100.0f, 65.0f, 100.0f, 7.0f, 10.0f, false, 45.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true, false },
-        { "ギターに揺らぎ",   0.08f, false, 2,  80.0f, 60.0f,  88.0f, 6.0f, 15.0f, false, 40.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true, false },
-        { "シンセを速く回す", 0.60f, false, 2,  90.0f, 70.0f, 100.0f, 8.0f,  0.0f, false, 40.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true, false },
-        { "実験:中心を消す", 0.04f, false, 2, 100.0f, 50.0f, 100.0f, 8.0f,  0.0f, true,  30.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true, false },
+        { "ボーカルを広げる", 0.10f, false, 2,  75.0f, 45.0f, 100.0f, 4.0f, 10.0f, false, 30.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true, false, false },
+        { "パッドを回す",     0.18f, false, 2, 100.0f, 65.0f, 100.0f, 7.0f, 10.0f, false, 45.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true, false, false },
+        { "ギターに揺らぎ",   0.08f, false, 2,  80.0f, 60.0f,  88.0f, 6.0f, 15.0f, false, 40.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true, false, false },
+        { "シンセを速く回す", 0.60f, false, 2,  90.0f, 70.0f, 100.0f, 8.0f,  0.0f, false, 40.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true, false, false },
+        { "実験:中心を消す", 0.04f, false, 2, 100.0f, 50.0f, 100.0f, 8.0f,  0.0f, true,  30.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true, false, false },
     };
 
     inline constexpr int numPresets = (int) (sizeof (presets) / sizeof (presets[0]));
 
     /**
-     * Sets every one of the 12 parameters from the preset, so the resulting
-     * sound never depends on state the preset didn't explicitly specify.
+     * Sets every parameter from the preset, so the resulting sound never
+     * depends on state the preset didn't explicitly specify.
+     *
+     * If undoManagerForOneStep is non-null, every parameter this preset
+     * touches is grouped into a single Undo step (a new transaction is
+     * opened once, before any parameter changes) - without this, undoing a
+     * preset application would require one Ctrl+Z per parameter, since
+     * APVTS otherwise starts a fresh transaction boundary only when told to.
+     * Left null (the default) for GUI-independent unit testing, where no
+     * UndoManager exists at all.
      */
-    inline void apply (juce::AudioProcessorValueTreeState& apvts, const Preset& preset)
+    inline void apply (juce::AudioProcessorValueTreeState& apvts, const Preset& preset,
+                        juce::UndoManager* undoManagerForOneStep = nullptr)
     {
+        if (undoManagerForOneStep != nullptr)
+            undoManagerForOneStep->beginNewTransaction (juce::String (juce::CharPointer_UTF8 (preset.name)));
+
         auto set = [&apvts] (const char* id, float actualValue)
         {
             if (auto* parameter = apvts.getParameter (id))
@@ -89,6 +102,7 @@ namespace dnaorbit::presets
         set (params::startPhaseID, preset.startPhaseDeg);
         set (params::directionID, preset.clockwise ? 0.0f : 1.0f);
         set (params::softBypassID, preset.softBypass ? 1.0f : 0.0f);
+        set (params::monoPreviewID, preset.monoPreview ? 1.0f : 0.0f);
     }
 
     /**
@@ -128,6 +142,7 @@ namespace dnaorbit::presets
             && isClose (params::phaseModeID, (float) preset.phaseMode, 0.5f)
             && isClose (params::startPhaseID, preset.startPhaseDeg, 1.0f)
             && isOn (params::directionID, ! preset.clockwise) // choice index 1 (CCW) == "on"
-            && isOn (params::softBypassID, preset.softBypass);
+            && isOn (params::softBypassID, preset.softBypass)
+            && isOn (params::monoPreviewID, preset.monoPreview);
     }
 }

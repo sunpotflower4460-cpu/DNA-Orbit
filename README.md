@@ -67,10 +67,11 @@ Presets are named after what they do rather than what they are —
 ボーカルを広げる / パッドを回す / ギターに揺らぎ / シンセを速く回す /
 実験:中心を消す — so the plugin is usable before touching a knob.
 
-A **バイパス (Soft Bypass)** toggle sits in the top bar and stays visible on
-both tabs — an in-plugin Bypass independent of the host's own Bypass, so it
-is always reachable and automatable regardless of how (or whether) a given
-host exposes its own Bypass. See below.
+A **バイパス (Soft Bypass)** toggle and a **モノ確認 (Mono Preview)** toggle
+sit in the top bar and stay visible on both tabs — Soft Bypass is an
+in-plugin Bypass independent of the host's own Bypass, and Mono Preview
+folds the output to mono for a quick mono-compatibility check. Both are
+always reachable and automatable regardless of host. See below.
 
 **詳細 (Detail)** — テンポ同期 + 分割, 対称性, ねじれ, 中心の芯, 出力,
 ステレオ保持, 低音アンカー, 音量自動補正, NULL CORE (marked in red), 音色
@@ -128,6 +129,7 @@ exceeds budget.
 | Start Phase | `startPhase` | 0 – 360° | 0° | The angle Retrigger snaps to, and the phase offset Host Lock's PPQ mapping is measured from. No dedicated knob yet (Detail tab) — automatable via the host's generic parameter list |
 | Direction | `direction` | CW / CCW | **CW** | Rotation direction; also which way Host Lock's PPQ-derived phase advances |
 | Soft Bypass | `softBypass` | on/off | **off** | In-plugin Bypass, independent of the host's own Bypass. Crossfades the final output to Dry over ~30ms; the orbit/filters/smoothers keep running underneath it. See below |
+| Mono Preview | `monoPreview` | on/off | **off** | Monitoring-only: folds the final output down to mono over ~30ms, to check mono-compatibility. Applied after Soft Bypass, so it previews whatever is actually being heard. See below |
 
 When host tempo is unavailable while Sync is on, the plugin falls back
 safely to the free-running Rate knob rather than guessing a tempo.
@@ -280,15 +282,55 @@ mode-switch crossfade, since Bypass is meant to feel immediate).
 **Compatibility**: off (the default) is exactly this engine's normal
 processing — no state-schema bump was needed.
 
+### Mono Preview
+
+`monoPreview` (the top bar's モノ確認 toggle, visible on both tabs) is a
+monitoring-only utility: it folds the final output down to mono over the
+same 30ms linear ramp as Soft Bypass, to check mono-compatibility (whether
+the stereo image collapses or cancels when summed to mono).
+
+```
+monoSum = 0.5 * (finalL + finalR)
+finalL += (monoSum - finalL) * monoPreviewAmount
+finalR += (monoSum - finalR) * monoPreviewAmount
+```
+
+It is applied *after* Soft Bypass, not before, so it always previews
+whatever is actually being heard right now — the processed signal
+normally, or the Dry signal if Soft Bypass is also engaged — rather than
+always previewing the processed signal regardless of Bypass state.
+
+**Compatibility**: off (the default) is exactly this engine's normal
+processing — no state-schema bump was needed.
+
+### Undo/Redo
+
+Every parameter change and preset application supports Ctrl+Z / Ctrl+Shift+Z
+(Cmd+Z / Cmd+Shift+Z on macOS) inside the plugin window. This uses APVTS's
+standard mechanism: `DNAOrbitAudioProcessor` owns a `juce::UndoManager` and
+passes it to its `AudioProcessorValueTreeState` constructor (instead of
+`nullptr`), so every `SliderAttachment`/`ButtonAttachment`/`ComboBoxAttachment`
+change is automatically undoable — no extra wiring per control.
+
+Applying a factory preset opens a single named Undo transaction before
+touching any parameter (`Presets::apply`'s optional `undoManagerForOneStep`
+argument), so undoing a preset pick is one Ctrl+Z, not one per parameter it
+touched. See `docs/commercial-upgrade/decisions/ADR-009-ui-ux-batch.md` for
+the full design, including a note on why some of this had to be tested by
+driving APVTS's underlying `ValueTree` directly rather than through a
+message loop (`JUCE_MODAL_LOOPS_PERMITTED` is off for plugin targets, so
+`Tests/UndoRedoTests.cpp` can't pump one the way a real host does).
+
 ### Presets
 
 Selectable from the プリセット menu in the 基本 tab. Defined in
 `Source/Presets.h` (GUI-independent, unit-tested) as a point in the full
-19-parameter space — Sync, Division, Output, Auto Gain, Stereo Preserve,
-Bass Anchor, Character, Host Phase Lock and Soft Bypass are set explicitly
-by every preset (Sync off, Division 1 bar, Output 0 dB, Auto Gain on,
-Stereo Preserve 70%, Bass Anchor 120 Hz, Character Natural, Phase Mode
-Free, Soft Bypass off, unless noted below), so choosing a preset is
+20-parameter space — Sync, Division, Output, Auto Gain, Stereo Preserve,
+Bass Anchor, Character, Host Phase Lock, Soft Bypass and Mono Preview are
+set explicitly by every preset (Sync off, Division 1 bar, Output 0 dB,
+Auto Gain on, Stereo Preserve 70%, Bass Anchor 120 Hz, Character Natural,
+Phase Mode Free, Soft Bypass off, Mono Preview off, unless noted below), so
+choosing a preset is
 deterministic: the result never depends on what was set before. The values
 are then saved with the project like any other setting.
 
@@ -437,7 +479,7 @@ built-in `UnitTest` framework:
   flat editor-state properties into their own `uiState` node, a fresh
   instance defaulting Stereo Preserve to 70%, and a schema-1 project loading
   with it forced to 0% instead.
-- **Presets** — every factory preset sets all 19 parameters the same way
+- **Presets** — every factory preset sets all 20 parameters the same way
   regardless of prior state (determinism), the Modified indicator matching
   right after applying a preset and going false once nudged, and Revert
   (re-apply) restoring the matched state.
@@ -500,6 +542,18 @@ built-in `UnitTest` framework:
   the processed signal (not stuck at Dry), that the orbit phase keeps
   advancing while it is engaged, and that the crossfade itself produces no
   audible sample-to-sample jump.
+- **MonoPreview** — that off (default) is bit-identical to never having Mono
+  Preview at all, that engaging it folds L/R to exactly equal within the
+  30ms ramp and that disengaging it restores the stereo image, that it
+  applies after Soft Bypass (both engaged together previews the mono-folded
+  Dry signal), and that the crossfade produces no audible sample-to-sample
+  jump.
+- **UndoRedo** — that `apvts` is wired to the processor's own UndoManager,
+  that undoing/redoing a single parameter change works, that multiple
+  changes grouped into one transaction undo/redo together (the mechanism
+  `Presets::apply`'s one-step-per-preset behaviour relies on), and that
+  `Presets::apply` opens a transaction named after the preset when given an
+  UndoManager.
 
 ## 10. Where the build output lands
 
