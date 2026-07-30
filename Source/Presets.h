@@ -5,10 +5,11 @@
 #include "Parameters.h"
 
 /**
- * Factory presets defined as a point in the FULL 12-parameter space (not just
+ * Factory presets defined as a point in the FULL parameter space (not just
  * the handful of knobs shown on the Basic tab), so applying one is
  * deterministic: the result depends only on which preset was picked, never on
- * whatever Sync/Division/Output/Auto Gain happened to be left at beforehand.
+ * whatever Sync/Division/Output/Auto Gain/Stereo Preserve/Bass Anchor
+ * happened to be left at beforehand.
  *
  * Kept independent of PluginEditor so it can be unit-tested without a GUI.
  */
@@ -29,14 +30,19 @@ namespace dnaorbit::presets
         // factory preset; not perceptually re-tuned per preset since that
         // needs real listening (see MANUAL_REQUIRED.md), not a guess.
         float stereoPreserve;
+        float bassAnchorHz;
+        // 0 = Natural (reproduces this engine's pre-Character sound
+        // exactly), 1 = Vivid, 2 = Deep. Every current factory preset keeps
+        // Natural; not perceptually re-tuned per preset without listening.
+        int character;
     };
 
     inline const Preset presets[] = {
-        { "ボーカルを広げる", 0.10f, false, 2,  75.0f, 45.0f, 100.0f, 4.0f, 10.0f, false, 30.0f, 0.0f, true, 70.0f },
-        { "パッドを回す",     0.18f, false, 2, 100.0f, 65.0f, 100.0f, 7.0f, 10.0f, false, 45.0f, 0.0f, true, 70.0f },
-        { "ギターに揺らぎ",   0.08f, false, 2,  80.0f, 60.0f,  88.0f, 6.0f, 15.0f, false, 40.0f, 0.0f, true, 70.0f },
-        { "シンセを速く回す", 0.60f, false, 2,  90.0f, 70.0f, 100.0f, 8.0f,  0.0f, false, 40.0f, 0.0f, true, 70.0f },
-        { "実験:中心を消す", 0.04f, false, 2, 100.0f, 50.0f, 100.0f, 8.0f,  0.0f, true,  30.0f, 0.0f, true, 70.0f },
+        { "ボーカルを広げる", 0.10f, false, 2,  75.0f, 45.0f, 100.0f, 4.0f, 10.0f, false, 30.0f, 0.0f, true, 70.0f, 120.0f, 0 },
+        { "パッドを回す",     0.18f, false, 2, 100.0f, 65.0f, 100.0f, 7.0f, 10.0f, false, 45.0f, 0.0f, true, 70.0f, 120.0f, 0 },
+        { "ギターに揺らぎ",   0.08f, false, 2,  80.0f, 60.0f,  88.0f, 6.0f, 15.0f, false, 40.0f, 0.0f, true, 70.0f, 120.0f, 0 },
+        { "シンセを速く回す", 0.60f, false, 2,  90.0f, 70.0f, 100.0f, 8.0f,  0.0f, false, 40.0f, 0.0f, true, 70.0f, 120.0f, 0 },
+        { "実験:中心を消す", 0.04f, false, 2, 100.0f, 50.0f, 100.0f, 8.0f,  0.0f, true,  30.0f, 0.0f, true, 70.0f, 120.0f, 0 },
     };
 
     inline constexpr int numPresets = (int) (sizeof (presets) / sizeof (presets[0]));
@@ -66,6 +72,8 @@ namespace dnaorbit::presets
         set (params::outputID, preset.output);
         set (params::autoGainID, preset.autoGain ? 1.0f : 0.0f);
         set (params::stereoPreserveID, preset.stereoPreserve);
+        set (params::bassAnchorHzID, preset.bassAnchorHz);
+        set (params::characterID, (float) preset.character);
     }
 
     /**
@@ -99,6 +107,8 @@ namespace dnaorbit::presets
             && isClose (params::mixID, preset.mix)
             && isClose (params::outputID, preset.output)
             && isOn (params::autoGainID, preset.autoGain)
-            && isClose (params::stereoPreserveID, preset.stereoPreserve);
+            && isClose (params::stereoPreserveID, preset.stereoPreserve)
+            && isClose (params::bassAnchorHzID, preset.bassAnchorHz, 1.0f)
+            && isClose (params::characterID, (float) preset.character, 0.5f);
     }
 }

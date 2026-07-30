@@ -483,6 +483,75 @@ namespace
                     1.0e-3f,
                     "A schema-2 save's chosen Stereo Preserve value must not be reset to 0 or the default");
             }
+
+            beginTest ("A fresh instance defaults Bass Anchor to 120Hz");
+            {
+                DNAOrbitAudioProcessor processor;
+                expectWithinAbsoluteError (
+                    processor.apvts.getRawParameterValue (dnaorbit::params::bassAnchorHzID)->load(),
+                    120.0f, 1.0e-2f);
+            }
+
+            beginTest ("A schema-2 (or earlier) save predating Bass Anchor loads with it forced to 20Hz (Off)");
+            {
+                DNAOrbitAudioProcessor processorA;
+                juce::MemoryBlock savedState;
+                processorA.getStateInformation (savedState);
+
+                std::unique_ptr<juce::XmlElement> xml (juce::AudioProcessor::getXmlFromBinary (
+                    savedState.getData(), (int) savedState.getSize()));
+                expect (xml != nullptr);
+
+                if (xml != nullptr)
+                {
+                    xml->setAttribute (dnaorbit::params::schemaVersionPropertyID, 2);
+
+                    juce::XmlElement* bassAnchorNode = nullptr;
+                    for (auto* child : xml->getChildIterator())
+                    {
+                        if (child->hasTagName ("PARAM")
+                            && child->getStringAttribute ("id") == dnaorbit::params::bassAnchorHzID)
+                        {
+                            bassAnchorNode = child;
+                            break;
+                        }
+                    }
+                    expect (bassAnchorNode != nullptr, "Test setup: bassAnchorHz PARAM node must exist to remove");
+                    if (bassAnchorNode != nullptr)
+                        xml->removeChildElement (bassAnchorNode, true);
+
+                    juce::MemoryBlock schema2State;
+                    juce::AudioProcessor::copyXmlToBinary (*xml, schema2State);
+
+                    DNAOrbitAudioProcessor processorB;
+                    processorB.setStateInformation (schema2State.getData(), (int) schema2State.getSize());
+
+                    expect (processorB.getLoadedSchemaVersion() == 2);
+                    expectWithinAbsoluteError (
+                        processorB.apvts.getRawParameterValue (dnaorbit::params::bassAnchorHzID)->load(),
+                        20.0f, 1.0e-2f,
+                        "A schema-2 project must load with Bass Anchor Off (20Hz), reproducing its original sound");
+                }
+            }
+
+            beginTest ("A schema-3 save with a custom Bass Anchor value round-trips unchanged");
+            {
+                DNAOrbitAudioProcessor processorA;
+                processorA.apvts.getParameter (dnaorbit::params::bassAnchorHzID)->setValueNotifyingHost (0.3f);
+
+                juce::MemoryBlock savedState;
+                processorA.getStateInformation (savedState);
+
+                DNAOrbitAudioProcessor processorB;
+                processorB.setStateInformation (savedState.getData(), (int) savedState.getSize());
+
+                expect (processorB.getLoadedSchemaVersion() == dnaorbit::params::currentStateSchemaVersion);
+                expectWithinAbsoluteError (
+                    processorB.apvts.getRawParameterValue (dnaorbit::params::bassAnchorHzID)->load(),
+                    processorA.apvts.getRawParameterValue (dnaorbit::params::bassAnchorHzID)->load(),
+                    1.0e-2f,
+                    "A schema-3 save's chosen Bass Anchor value must not be reset to Off or the default");
+            }
         }
     };
 

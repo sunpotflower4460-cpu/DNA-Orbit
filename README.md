@@ -116,6 +116,8 @@ exceeds budget.
 | Output | `output` | -12 – +6 dB | 0 dB | Final output trim |
 | Auto Gain | `autoGain` | on/off | **on** | Level-matches Wet to Dry so moving Mix does not change perceived loudness |
 | Stereo Preserve | `stereoPreserve` | 0 – 100% | **70%**, candidate pending listening (0% for projects saved before this parameter existed) | How much of the input's Side content is added back as a separate width "bed" alongside the strands. See below |
+| Bass Anchor | `bassAnchorHz` | 20 – 500 Hz (log-skewed) | 120 Hz, "Off" at 20 Hz (20 Hz for projects saved before this parameter existed) | Content below this frequency bypasses the orbit entirely and stays at its original stereo position. See below |
+| Character | `character` | Natural / Vivid / Deep | **Natural** | How strongly the back position is coloured (attenuation/cutoff/delay). Natural reproduces this plugin's original fixed sound exactly; Vivid and Deep darken and delay the back position progressively more |
 
 When host tempo is unavailable while Sync is on, the plugin falls back
 safely to the free-running Rate knob rather than guessing a tempo.
@@ -175,15 +177,48 @@ including why the spec's proposed extra loudness-matching normalizer for
 this knob was deliberately left out, and why 70% is a candidate default
 pending real-material listening rather than a confirmed final value.
 
+### Bass Anchor
+
+Low frequencies panning and drifting with the orbit can make a kick or bass
+feel unstable. `bassAnchorHz` splits the input through a 4th-order
+Linkwitz-Riley crossover (`Source/dsp/CrossoverFilter.h`, reconstructs the
+input with flat magnitude and phase — verified by a 20Hz–20kHz sweep test,
+not just assumed): content below the crossover point bypasses the orbit
+entirely and is added straight into Wet at its original stereo position
+(undelayed, unpanned); only content above the crossover feeds the
+strands/Core/Stereo Preserve bed.
+
+At the range minimum (20Hz, displayed as "Off") the crossover is not just
+narrowed to near-nothing — the DSP takes a dedicated bypass branch that
+skips it entirely, so 20Hz is bit-identical to not having Bass Anchor at
+all. That is what makes it safe as the schema-2-and-earlier compatible
+value: a project saved before this parameter existed loads with it forced
+to 20Hz.
+
+### Character
+
+`character` (Natural / Vivid / Deep) scales the back position's
+attenuation, filter cutoff, and delay together. **Natural is exactly this
+plugin's original fixed values** (4dB attenuation, 5kHz cutoff, 8ms delay)
+— not the spec's own suggested "Natural" numbers, deliberately: keeping
+today's actual sound as the baseline meant Character needed no state-schema
+bump or migration at all, since selecting the default changes nothing for
+any existing project. Vivid (5dB/4kHz/10ms) and Deep (6.5dB/3kHz/14ms)
+progressively darken and delay the back position from there. See
+`docs/commercial-upgrade/decisions/ADR-006-character.md` for the reasoning,
+including the spec section (§6.2's high-shelf/presence EQ) deliberately not
+implemented yet.
+
 ### Presets
 
 Selectable from the プリセット menu in the 基本 tab. Defined in
 `Source/Presets.h` (GUI-independent, unit-tested) as a point in the full
-13-parameter space — Sync, Division, Output, Auto Gain and Stereo Preserve
-are set explicitly by every preset (Sync off, Division 1 bar, Output 0 dB,
-Auto Gain on, Stereo Preserve 70%, unless noted below), so choosing a preset
-is deterministic: the result never depends on what was set before. The
-values are then saved with the project like any other setting.
+15-parameter space — Sync, Division, Output, Auto Gain, Stereo Preserve,
+Bass Anchor and Character are set explicitly by every preset (Sync off,
+Division 1 bar, Output 0 dB, Auto Gain on, Stereo Preserve 70%, Bass Anchor
+120 Hz, Character Natural, unless noted below), so choosing a preset is
+deterministic: the result never depends on what was set before. The values
+are then saved with the project like any other setting.
 
 Once you nudge anything after picking a preset, a 元に戻す (Revert) button
 appears next to the menu to snap back to the preset's exact values.
@@ -365,6 +400,20 @@ built-in `UnitTest` framework:
   that a phase error visibly displaces it, that a long message-thread stall
   resynthesises rather than looping, and that the projection fits inside the
   component at every supported window size and never folds over.
+- **CrossoverFilter** — that Low + High reconstructs the input within
+  0.5dB of flat across a 20Hz-20kHz sweep (Linkwitz-Riley's defining
+  property, measured rather than assumed), that Low/High are near-silent on
+  the wrong side of the crossover, silence-in/silence-out, and finite output
+  across sample rates and extreme crossover frequencies.
+- **BassAnchor** — that 20Hz (Off) is bit-identical to never having Bass
+  Anchor at all, that low-frequency content stays tied to its input channel
+  instead of being smeared by orbit panning, that high-frequency content
+  still orbits normally, and that Mix 0% still matches Dry exactly.
+- **Character** — that Natural (default) is bit-identical to never having
+  Character at all, that Vivid/Deep measurably darken the back position
+  more than Natural (progressively), finite output across sample rates and
+  Twist's maximum stacked with Deep's longer back delay, and that Mix 0%
+  still matches Dry exactly at every value.
 
 ## 10. Where the build output lands
 

@@ -77,6 +77,8 @@ private:
     std::atomic<float>* outputParam     = nullptr;
     std::atomic<float>* autoGainParam   = nullptr;
     std::atomic<float>* stereoPreserveParam = nullptr;
+    std::atomic<float>* bassAnchorHzParam   = nullptr;
+    std::atomic<float>* characterParam      = nullptr;
 
     int loadedSchemaVersion = dnaorbit::params::currentStateSchemaVersion;
 

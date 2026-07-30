@@ -11,7 +11,7 @@ namespace
 
         void runTest() override
         {
-            beginTest ("Every factory preset sets all 12 parameters deterministically, regardless of prior state");
+            beginTest ("Every factory preset sets all parameters deterministically, regardless of prior state");
             {
                 for (int i = 0; i < dnaorbit::presets::numPresets; ++i)
                 {
@@ -32,6 +32,8 @@ namespace
                     processorB.apvts.getParameter (dnaorbit::params::autoGainID)->setValueNotifyingHost (0.0f);
                     processorB.apvts.getParameter (dnaorbit::params::mixID)->setValueNotifyingHost (0.9f);
                     processorB.apvts.getParameter (dnaorbit::params::stereoPreserveID)->setValueNotifyingHost (0.05f);
+                    processorB.apvts.getParameter (dnaorbit::params::bassAnchorHzID)->setValueNotifyingHost (0.9f);
+                    processorB.apvts.getParameter (dnaorbit::params::characterID)->setValueNotifyingHost (1.0f);
 
                     dnaorbit::presets::apply (processorA.apvts, preset);
                     dnaorbit::presets::apply (processorB.apvts, preset);
@@ -42,7 +44,8 @@ namespace
                                              dnaorbit::params::twistID, dnaorbit::params::coreID,
                                              dnaorbit::params::nullCoreID, dnaorbit::params::mixID,
                                              dnaorbit::params::outputID, dnaorbit::params::autoGainID,
-                                             dnaorbit::params::stereoPreserveID })
+                                             dnaorbit::params::stereoPreserveID, dnaorbit::params::bassAnchorHzID,
+                                             dnaorbit::params::characterID })
                     {
                         expectWithinAbsoluteError (processorA.apvts.getRawParameterValue (id)->load(),
                                                     processorB.apvts.getRawParameterValue (id)->load(), 1.0e-3f,

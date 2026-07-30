@@ -22,6 +22,8 @@ namespace dnaorbit::params
     inline constexpr const char* outputID   = "output";
     inline constexpr const char* autoGainID = "autoGain";
     inline constexpr const char* stereoPreserveID = "stereoPreserve";
+    inline constexpr const char* bassAnchorHzID   = "bassAnchorHz";
+    inline constexpr const char* characterID      = "character";
 
     /**
      * State schema version, stored as a property on apvts.state (alongside
@@ -44,6 +46,15 @@ namespace dnaorbit::params
      *       and Tests/BaselineRegressionTests.cpp). A genuinely fresh
      *       instance (nothing loaded) gets the parameter's declared default
      *       instead.
+     *   3 - adds Bass Anchor (bassAnchorHzID): a Linkwitz-Riley crossover
+     *       splits input into a low band (kept as a direct, non-orbiting
+     *       stereo-image-preserving anchor) and a high band (which alone
+     *       feeds the strands/Core/Stereo-Preserve-bed machinery). At the
+     *       parameter's range minimum (20Hz) the crossover is fully bypassed
+     *       in the DSP, not just a near-zero split, which is what makes 20Hz
+     *       the exact schema-2-and-earlier-compatible value. A schema-1/2
+     *       save has no bassAnchorHz PARAM node, so it is force-set to 20Hz
+     *       (Off) on load; a fresh instance gets the declared default.
      *
      * Bump this whenever a new schema version changes how a *missing* schema
      * property (i.e. a project saved by an older build) should be
@@ -51,7 +62,7 @@ namespace dnaorbit::params
      * defaults safely on its own. See PluginProcessor::setStateInformation.
      */
     inline constexpr const char* schemaVersionPropertyID = "dnaOrbitSchemaVersion";
-    inline constexpr int currentStateSchemaVersion = 2;
+    inline constexpr int currentStateSchemaVersion = 3;
 
     /**
      * A save with no schemaVersion attribute at all predates the property
@@ -65,6 +76,9 @@ namespace dnaorbit::params
 
     /** Schema version at which stereoPreserveID first existed; see above. */
     inline constexpr int stereoPreserveIntroducedInSchema = 2;
+
+    /** Schema version at which bassAnchorHzID first existed; see above. */
+    inline constexpr int bassAnchorIntroducedInSchema = 3;
 
     /**
      * Editor-only state (which tab is showing, window size) lives in its own
@@ -93,6 +107,12 @@ namespace dnaorbit::params
     // reproduce its original sound - see currentStateSchemaVersion above.
     inline constexpr float stereoPreserveDefaultPercent = 70.0f;
     inline constexpr float stereoPreserveLegacyPercent = 0.0f;
+
+    inline constexpr float bassAnchorMinHz = 20.0f;
+    inline constexpr float bassAnchorMaxHz = 500.0f;
+    inline constexpr float bassAnchorDefaultHz = 120.0f;
+    // Also the exact DSP-bypass value - see HelixEngine::process().
+    inline constexpr float bassAnchorLegacyHz = bassAnchorMinHz;
 
     inline const juce::StringArray syncDivisionChoices {
         "4 bars", "2 bars", "1 bar", "1/2", "1/4", "1/8"
@@ -203,13 +223,48 @@ namespace dnaorbit::params
         paramList.push_back (std::make_unique<juce::AudioParameterBool> (
             juce::ParameterID { autoGainID, 1 }, "Auto Gain", true));
 
-        // 0% = both strands (and Core) fed from a shared Mid downmix, the
-        // schema-1 behaviour. 100% = Strand A/B fed directly from L/R. See
-        // HelixEngine::process() and the schema-version doc comment above.
+        // Both strands and Core always stay fed from a shared Mid downmix at
+        // any value (so their energies stay exactly balanced regardless of
+        // input); this controls how much of the input's Side content is
+        // added back as a separate, non-orbiting width "bed". See
+        // HelixEngine::process(), the schema-version doc comment above, and
+        // docs/commercial-upgrade/decisions/ADR-004-stereo-preserve-bed.md.
         paramList.push_back (std::make_unique<juce::AudioParameterFloat> (
             juce::ParameterID { stereoPreserveID, 1 }, "Stereo Preserve",
             juce::NormalisableRange<float> (0.0f, 100.0f, 0.01f), stereoPreserveDefaultPercent,
             juce::AudioParameterFloatAttributes().withLabel ("%")));
+
+        // At the range minimum (20Hz) the crossover is fully bypassed in the
+        // DSP (see HelixEngine::process()), not merely a near-zero split -
+        // that is what makes 20Hz both the displayed "Off" state and the
+        // exact schema-2-and-earlier-compatible value.
+        paramList.push_back (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { bassAnchorHzID, 1 }, "Bass Anchor",
+            juce::NormalisableRange<float> (bassAnchorMinHz, bassAnchorMaxHz, 0.01f, 0.35f),
+            bassAnchorDefaultHz,
+            juce::AudioParameterFloatAttributes()
+                .withStringFromValueFunction ([] (float hz, int)
+                {
+                    if (hz <= bassAnchorMinHz + 0.05f)
+                        return juce::String ("Off");
+                    return juce::String ((int) std::round (hz)) + juce::String (juce::CharPointer_UTF8 ("Hz"));
+                })
+                .withValueFromStringFunction ([] (const juce::String& text)
+                {
+                    if (text.trim().equalsIgnoreCase ("Off"))
+                        return bassAnchorMinHz;
+                    return juce::jlimit (bassAnchorMinHz, bassAnchorMaxHz, text.getFloatValue());
+                })));
+
+        // Natural (index 0) is exactly this engine's fixed back-attenuation/
+        // cutoff/delay constants from before Character existed - the
+        // default reproduces every existing project's sound unchanged, so
+        // this parameter needed no schema-version bump. See
+        // HelixEngine::applyParameters() and
+        // docs/commercial-upgrade/decisions/ADR-006-character.md.
+        paramList.push_back (std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID { characterID, 1 }, "Character",
+            juce::StringArray { "Natural", "Vivid", "Deep" }, 0));
 
         return { paramList.begin(), paramList.end() };
     }

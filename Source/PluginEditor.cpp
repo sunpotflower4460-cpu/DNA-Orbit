@@ -99,7 +99,10 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
                jp("最終的な出力音量の微調整です。"));
     setUpKnob (stereoPreserveKnob, params::stereoPreserveID, jp("ステレオ保持"), jp("左右の情報量"),
                jp("エフェクト音に元のステレオ感をどれだけ残すかです。0%は中央成分のみ、")
-               + jp("100%で元の左右がそのままA/Bに渡ります。逆位相の素材でも音が消えにくくなります。"));
+               + jp("100%で元の左右の広がりがそのまま加わります。逆位相の素材でも音が消えにくくなります。"));
+    setUpKnob (bassAnchorKnob, params::bassAnchorHzID, jp("低音アンカー"), jp("低域を安定させる"),
+               jp("設定した周波数より下の低音は軌道に乗らず、元の定位のまま真っ直ぐ残ります。")
+               + jp("Offで無効。キックやベースの中心が動いて不安定に感じるときに上げてください。"));
 
     syncButton.setButtonText (jp("テンポ同期"));
     syncButton.setTooltip (jp("ホストのテンポに合わせて回転速度を決めます。テンポが取得できない場合は「速さ」の値に戻ります。"));
@@ -130,6 +133,18 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
                                + jp("モノラルにまとめるとエフェクト音がほぼ消えます。通常は切っておいてください。"));
     addAndMakeVisible (nullCoreButton);
     nullCoreAttachment = std::make_unique<ButtonAttachment> (processorRef.apvts, params::nullCoreID, nullCoreButton);
+
+    characterLabel.setText (jp("音色"), juce::dontSendNotification);
+    characterLabel.setFont (japaneseFont (11.0f));
+    characterLabel.setJustificationType (juce::Justification::centredLeft);
+    characterLabel.setColour (juce::Label::textColourId, dnaorbit::ui::DnaLookAndFeel::textColour());
+    addAndMakeVisible (characterLabel);
+
+    characterBox.addItemList (juce::StringArray { jp ("ナチュラル"), jp ("ビビッド"), jp ("ディープ") }, 1);
+    characterBox.setTooltip (jp("背後に回ったときの音の変化の強さです。ナチュラルが既定(従来の音)、")
+                             + jp("ビビッド・ディープと進むほど背後で暗く/揺れが大きくなります。"));
+    addAndMakeVisible (characterBox);
+    characterAttachment = std::make_unique<ComboAttachment> (processorRef.apvts, params::characterID, characterBox);
 
     // --- Readouts ---------------------------------------------------------------
     // Monospaced with a fixed sign column: digit-width jitter at high refresh
@@ -225,7 +240,7 @@ void DNAOrbitAudioProcessorEditor::showPage (int page)
         knob->hintLabel.setVisible (basic);
     }
 
-    for (auto* knob : { &symmetryKnob, &twistKnob, &coreKnob, &outputKnob, &stereoPreserveKnob })
+    for (auto* knob : { &symmetryKnob, &twistKnob, &coreKnob, &outputKnob, &stereoPreserveKnob, &bassAnchorKnob })
     {
         knob->slider.setVisible (! basic);
         knob->nameLabel.setVisible (! basic);
@@ -237,6 +252,8 @@ void DNAOrbitAudioProcessorEditor::showPage (int page)
     divisionLabel.setVisible (! basic);
     autoGainButton.setVisible (! basic);
     nullCoreButton.setVisible (! basic);
+    characterBox.setVisible (! basic);
+    characterLabel.setVisible (! basic);
 
     presetBox.setVisible (basic);
     presetLabel.setVisible (basic);
@@ -368,7 +385,11 @@ void DNAOrbitAudioProcessorEditor::resized()
         toggleColumn.removeFromTop (4);
         nullCoreButton.setBounds (toggleColumn.removeFromTop (26));
 
-        layOutKnobRow (controlArea, { &symmetryKnob, &twistKnob, &coreKnob, &outputKnob, &stereoPreserveKnob });
+        auto characterRow = toggleColumn; // whatever remains
+        characterLabel.setBounds (characterRow.removeFromLeft (34));
+        characterBox.setBounds (characterRow);
+
+        layOutKnobRow (controlArea, { &symmetryKnob, &twistKnob, &coreKnob, &outputKnob, &stereoPreserveKnob, &bassAnchorKnob });
     }
 
     // --- Centre: readouts | 3D helix ------------------------------------------

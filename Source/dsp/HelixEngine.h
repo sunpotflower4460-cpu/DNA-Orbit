@@ -7,6 +7,7 @@
 #include "OrbitMath.h"
 #include "OnePoleLowPass.h"
 #include "StereoUtilities.h"
+#include "CrossoverFilter.h"
 
 namespace dnaorbit::dsp
 {
@@ -63,6 +64,33 @@ namespace dnaorbit::dsp
              * applied by PluginProcessor.
              */
             float stereoPreserve01 = 0.0f;
+
+            /**
+             * Linkwitz-Riley crossover point in Hz splitting input into a
+             * low band (kept as a direct, non-orbiting, stereo-image-
+             * preserving anchor) and a high band (which alone feeds the
+             * strands/Core/Stereo-Preserve-bed). At the range minimum
+             * (20Hz) the crossover is fully bypassed in the DSP - not just a
+             * near-zero split - which is what makes 20Hz both the "Off"
+             * display and the exact schema-2-and-earlier-compatible value.
+             * Defaults to 20Hz (bypassed) here for the same reason
+             * stereoPreserve01 defaults to 0 - the actual product default
+             * lives in Parameters.h and is applied by PluginProcessor.
+             */
+            float bassAnchorHz = 20.0f;
+
+            /**
+             * 0 = Natural, 1 = Vivid, 2 = Deep. Scales the back-position
+             * attenuation/cutoff/delay together (see applyParameters()).
+             * Natural (the default here and the product default) reproduces
+             * the fixed constants this engine always used before Character
+             * existed exactly, so introducing this parameter changes no
+             * existing project's sound - see
+             * docs/commercial-upgrade/decisions/ADR-006-character.md for why
+             * this deliberately does not match the spec's own suggested
+             * absolute numbers for "Natural".
+             */
+            int character = 0;
         };
 
         void prepare (double newSampleRate, int maximumBlockSize, int maxChannelsHint);
@@ -188,6 +216,15 @@ namespace dnaorbit::dsp
         static constexpr double correlationTimeConstantSeconds = 0.2;
         static constexpr float  maxMixLawCorrectionDb = 3.0f; // +/-3dB, per spec
 
+        // Bass Anchor: one crossover per input channel. Coefficients are
+        // recomputed at most once per block (see applyParameters()), not
+        // per-sample - a Butterworth biquad coefficient recalculation is
+        // heavy enough that doing it every sample would be wasteful for a
+        // parameter nobody automates at audio rate (see the CPU-optimization
+        // guidance to move filter-coefficient updates to control rate).
+        LinkwitzRileyCrossover bassAnchorL, bassAnchorR;
+        bool  bassAnchorBypassed = true;
+
         // Per-strand processing chains.
         OnePoleLowPass lowPassA, lowPassB;
         juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Lagrange3rd> delayA { 1 << 14 };
@@ -195,14 +232,25 @@ namespace dnaorbit::dsp
         float maxDelaySamplesStored = 0.0f;
 
         static constexpr float strandGain       = 0.5f;
-        static constexpr float maxBackAttenDb    = 4.0f;
         static constexpr float frontCutoffHz     = 19000.0f;
-        static constexpr float backCutoffHz      = 5000.0f;
-        static constexpr float maxBackDelayMs    = 8.0f;
         static constexpr double maxRateDifference = 0.03;
         static constexpr double symmetryLockThreshold = 0.999;
         static constexpr double resyncDurationSeconds = 0.2; // within the 100-300ms spec window
         static constexpr float  maxWetMakeupGain = 4.0f;     // +12 dB ceiling
+
+        /**
+         * Character (Natural/Vivid/Deep) scales these three together, once
+         * per block in applyParameters() - not per-sample, matching the
+         * Bass Anchor precedent for anything that isn't a plain gain/time
+         * SmoothedValue. The Natural values are exactly this engine's fixed
+         * constants from before Character existed, so the default
+         * reproduces every existing project's sound unchanged; Vivid/Deep
+         * are progressively more coloured from there. See
+         * docs/commercial-upgrade/decisions/ADR-006-character.md.
+         */
+        float maxBackAttenDb = 4.0f;
+        float backCutoffHz   = 5000.0f;
+        float maxBackDelayMs = 8.0f;
 
         // Published for the UI thread; written once per block.
         std::atomic<float> uiThetaA { 0.0f };

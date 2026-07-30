@@ -24,7 +24,12 @@ namespace dnaorbit::dsp
         lowPassA.prepare (sampleRate);
         lowPassB.prepare (sampleRate);
 
-        // Enough headroom for max back-delay (8ms) + max twist (20ms) + margin.
+        bassAnchorL.prepare (sampleRate);
+        bassAnchorR.prepare (sampleRate);
+
+        // Enough headroom for max back-delay (14ms at Character=Deep) + max
+        // twist (20ms) + margin. 60ms budgeted comfortably covers the 34ms
+        // actually needed.
         const auto maxDelaySamples = (int) std::ceil (0.06 * sampleRate) + 16;
         delayA.setMaximumDelayInSamples (maxDelaySamples);
         delayB.setMaximumDelayInSamples (maxDelaySamples);
@@ -58,6 +63,8 @@ namespace dnaorbit::dsp
         lowPassB.reset();
         delayA.reset();
         delayB.reset();
+        bassAnchorL.reset();
+        bassAnchorR.reset();
 
         radiusSmoothed.setCurrentAndTargetValue (radiusSmoothed.getCurrentValue());
         depthSmoothed.setCurrentAndTargetValue (depthSmoothed.getCurrentValue());
@@ -123,6 +130,40 @@ namespace dnaorbit::dsp
         const float mix01      = sanitizeParam (p.mix01, 0.35f);
         const float outputDb   = sanitizeParam (p.outputDb, 0.0f);
         const float stereoPreserve01 = std::clamp (sanitizeParam (p.stereoPreserve01, 0.0f), 0.0f, 1.0f);
+        const float bassAnchorHz = std::clamp (sanitizeParam (p.bassAnchorHz, 20.0f), 20.0f, 500.0f);
+
+        // At most once per block, not per-sample - see the member comment in
+        // HelixEngine.h. The early-return-if-unchanged guard inside
+        // setCrossoverHz() means an unautomated Bass Anchor costs nothing
+        // extra here beyond a float comparison.
+        bassAnchorBypassed = bassAnchorHz <= 20.0f + 1.0e-3f;
+        if (! bassAnchorBypassed)
+        {
+            bassAnchorL.setCrossoverHz (bassAnchorHz);
+            bassAnchorR.setCrossoverHz (bassAnchorHz);
+        }
+
+        // Character: also applied at most once per block, not per-sample -
+        // see the member comment in HelixEngine.h. Natural reproduces the
+        // exact fixed constants this engine always used, by design.
+        switch (juce::jlimit (0, 2, p.character))
+        {
+            case 1: // Vivid
+                maxBackAttenDb = 5.0f;
+                backCutoffHz   = 4000.0f;
+                maxBackDelayMs = 10.0f;
+                break;
+            case 2: // Deep
+                maxBackAttenDb = 6.5f;
+                backCutoffHz   = 3000.0f;
+                maxBackDelayMs = 14.0f;
+                break;
+            default: // Natural
+                maxBackAttenDb = 4.0f;
+                backCutoffHz   = 5000.0f;
+                maxBackDelayMs = 8.0f;
+                break;
+        }
 
         nullCoreTarget = p.nullCore;
 
@@ -215,6 +256,23 @@ namespace dnaorbit::dsp
             const float dryL = sampleInL;
             const float dryR = sampleInR;
 
+            // --- Bass Anchor: split into a low band (direct, non-orbiting) --------
+            // and a high band (feeds the orbit machinery below). Bypassed
+            // entirely at bassAnchorBypassed (the 20Hz/"Off" state), so the
+            // high band is then simply the raw input - this identity is what
+            // makes 20Hz reproduce schema-2-and-earlier's sound exactly.
+            float lowL = 0.0f, lowR = 0.0f;
+            float orbitInL = sampleInL, orbitInR = sampleInR;
+            if (! bassAnchorBypassed)
+            {
+                const auto lhL = bassAnchorL.processSample (sampleInL);
+                const auto lhR = bassAnchorR.processSample (sampleInR);
+                lowL = lhL.low;
+                lowR = lhR.low;
+                orbitInL = lhL.high;
+                orbitInR = lhR.high;
+            }
+
             // --- Stereo Preserve: Mid orbit + a separate Side "bed" -------------
             // Both strands and Core are fed from Mid ONLY, always - never from
             // L/R directly - so the orbit's energy is always exactly balanced
@@ -237,8 +295,8 @@ namespace dnaorbit::dsp
             // mono-downmix Wet source: this is what makes stereoPreserve == 0
             // reproduce the schema-1 sound (including anti-phase input
             // collapsing Wet to silence), see Tests/BaselineRegressionTests.cpp.
-            const float mid  = stereoIn ? 0.5f * (sampleInL + sampleInR) : sampleInL;
-            const float side = stereoIn ? 0.5f * (sampleInL - sampleInR) : 0.0f;
+            const float mid  = stereoIn ? 0.5f * (orbitInL + orbitInR) : orbitInL;
+            const float side = stereoIn ? 0.5f * (orbitInL - orbitInR) : 0.0f;
             const float bedL = stereoPreserve * side;
             const float bedR = -stereoPreserve * side;
 
@@ -330,7 +388,7 @@ namespace dnaorbit::dsp
             const float strandBL = delayedB * (float) gainsB.left * strandGain;
             const float strandBR = delayedB * (float) gainsB.right * strandGain;
 
-            // --- Wet sum, Core, Stereo Preserve bed, NULL CORE ------------------------
+            // --- Wet sum, Core, Stereo Preserve bed, Bass Anchor, NULL CORE -----------
             float wetL = strandAL + strandBL;
             float wetR = strandAR + strandBR;
 
@@ -346,6 +404,16 @@ namespace dnaorbit::dsp
             // mono-safe: L + R of a pure Side signal is 0 by construction).
             wetL += bedL;
             wetR += bedR;
+
+            // Bass Anchor's low band: added directly, undelayed and
+            // unpanned, preserving whatever L/R (or M/S) balance it already
+            // had in the input - it never enters the orbit, so it can't be
+            // smeared by strand panning/delay. Deliberately not guaranteed
+            // mono-safe the way the Stereo Preserve bed is: it is exactly as
+            // mono-compatible as the input's own bass was, nothing more or
+            // less (see docs/commercial-upgrade/decisions/ADR-005-bass-anchor.md).
+            wetL += lowL;
+            wetR += lowR;
 
             const auto nulled = nullCoreProcess (wetL, wetR);
             wetL += (nulled.left  - wetL) * nullCoreAmount;
@@ -401,11 +469,13 @@ namespace dnaorbit::dsp
             // both strands and Core are always fed from Mid (see the Stereo
             // Preserve comment above), remains exactly true for any
             // stereoPreserve value, not just 0. The Stereo Preserve bed
-            // (bedL/bedR) is deliberately NOT included in this prediction:
-            // its power relative to Mid's depends on the input's actual
-            // Mid/Side energy ratio, which this formula cannot know without
-            // becoming signal-adaptive (and risking the pumping this
-            // deterministic design exists to avoid) - see ADR-004.
+            // (bedL/bedR) and the Bass Anchor low band (lowL/lowR) are
+            // deliberately NOT included in this prediction: their power
+            // relative to Mid's depends on the input's actual Mid/Side
+            // energy ratio and low-frequency content respectively, neither
+            // of which this formula can know without becoming signal-
+            // adaptive (and risking the pumping this deterministic design
+            // exists to avoid) - see ADR-004 and ADR-005.
             const float wetMakeup = 1.0f + (makeupTarget - 1.0f) * autoGainAmount;
             wetL *= wetMakeup;
             wetR *= wetMakeup;

@@ -69,15 +69,17 @@ private:
     Knob rateKnob, radiusKnob, depthKnob, mixKnob;
 
     // Detail page.
-    Knob symmetryKnob, twistKnob, coreKnob, outputKnob, stereoPreserveKnob;
+    Knob symmetryKnob, twistKnob, coreKnob, outputKnob, stereoPreserveKnob, bassAnchorKnob;
     juce::ToggleButton syncButton;
     juce::ComboBox divisionBox;
     juce::Label divisionLabel;
     juce::ToggleButton autoGainButton;
     juce::ToggleButton nullCoreButton;
+    juce::ComboBox characterBox;
+    juce::Label characterLabel;
 
     std::unique_ptr<ButtonAttachment> syncAttachment, autoGainAttachment, nullCoreAttachment;
-    std::unique_ptr<ComboAttachment> divisionAttachment;
+    std::unique_ptr<ComboAttachment> divisionAttachment, characterAttachment;
 
     // Live readouts, updated on a slow timer so 45 fps helix repaints never
     // trigger glyph re-layout.

@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include <cmath>
 
 namespace
 {
@@ -49,6 +50,8 @@ DNAOrbitAudioProcessor::DNAOrbitAudioProcessor()
     outputParam   = apvts.getRawParameterValue (dnaorbit::params::outputID);
     autoGainParam = apvts.getRawParameterValue (dnaorbit::params::autoGainID);
     stereoPreserveParam = apvts.getRawParameterValue (dnaorbit::params::stereoPreserveID);
+    bassAnchorHzParam   = apvts.getRawParameterValue (dnaorbit::params::bassAnchorHzID);
+    characterParam      = apvts.getRawParameterValue (dnaorbit::params::characterID);
 }
 
 void DNAOrbitAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
@@ -124,6 +127,12 @@ dnaorbit::dsp::HelixEngine::Parameters DNAOrbitAudioProcessor::currentParameterS
     p.outputDb   = outputParam->load();
     p.autoGain   = autoGainParam->load() > 0.5f;
     p.stereoPreserve01 = stereoPreserveParam->load() / 100.0f;
+    p.bassAnchorHz     = bassAnchorHzParam->load();
+    // (int) of a NaN float is undefined behaviour; std::isfinite guards it
+    // before the cast rather than relying on HelixEngine's own clamp, which
+    // can only run after the cast has already happened.
+    const float characterRaw = characterParam->load();
+    p.character        = std::isfinite (characterRaw) ? (int) characterRaw : 0;
     return p;
 }
 
@@ -225,6 +234,16 @@ void DNAOrbitAudioProcessor::setStateInformation (const void* data, int sizeInBy
     {
         if (auto* stereoPreserve = apvts.getParameter (dnaorbit::params::stereoPreserveID))
             stereoPreserve->setValueNotifyingHost (stereoPreserve->convertTo0to1 (dnaorbit::params::stereoPreserveLegacyPercent));
+    }
+
+    // Same reasoning for Bass Anchor: a save from before schema 3 has no
+    // bassAnchorHz PARAM node, so it is force-set to 20Hz (the exact DSP
+    // bypass value - see HelixEngine::process()) rather than the current
+    // product default.
+    if (loadedSchemaVersion < dnaorbit::params::bassAnchorIntroducedInSchema)
+    {
+        if (auto* bassAnchor = apvts.getParameter (dnaorbit::params::bassAnchorHzID))
+            bassAnchor->setValueNotifyingHost (bassAnchor->convertTo0to1 (dnaorbit::params::bassAnchorLegacyHz));
     }
 }
 

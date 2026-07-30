@@ -82,6 +82,7 @@ namespace
         // these scenarios a schema-1/legacy fingerprint (see the class
         // comment and Source/Parameters.h's stereoPreserveIntroducedInSchema).
         p.stereoPreserve01 = 0.0f;
+        p.bassAnchorHz = 20.0f; // "Off" - exact DSP bypass, see HelixEngine::process()
         engine.primeParameters (p);
         engine.setParameters (p);
 
@@ -174,6 +175,7 @@ namespace
                 p.outputDb = 0.0f;
                 p.autoGain = true;
                 p.stereoPreserve01 = 0.0f;
+                p.bassAnchorHz = 20.0f; // "Off"
                 engine.primeParameters (p);
                 engine.setParameters (p);
 

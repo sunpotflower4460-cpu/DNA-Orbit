@@ -105,6 +105,38 @@ silencing Wet, Mix-sweep RMS deviation bounds) for actually listening.
   `Tools/StereoPreserveAnalysis.cpp` (build with `-DDNA_ORBIT_BUILD_TOOLS=ON`)
   reproduces the numeric measurements cited in ADR-004 on demand.
 
+- **Bass Anchor crossover character and default (120Hz)** (see
+  `docs/commercial-upgrade/decisions/ADR-005-bass-anchor.md`): the
+  Linkwitz-Riley 4th-order crossover's flat reconstruction is verified
+  numerically (a 20Hz-20kHz sweep, `Tests/CrossoverFilterTests.cpp`), but
+  whether the transition band *sounds* seamless on real kick/bass material
+  (no audible dip, smearing, or phasiness right around the crossover
+  frequency) needs real ears. 120Hz is the shipped default per the spec;
+  it has not been tuned by listening. If it needs adjusting, update
+  `Parameters.h`'s `bassAnchorDefaultHz` deliberately with a commit
+  explaining the listening result.
+- **CPU cost of Bass Anchor + everything else, on real hardware/DAWs, with
+  multiple instances**: ADR-005 explicitly scoped OUT the broader CPU
+  optimizations from spec §11 (control-rate batching for the existing
+  trig/coherence/Mix-gain code, `sin(θ+π)=-sin(θ)` reuse, conditional
+  `fmod`) because this container cannot produce a trustworthy CPU
+  measurement and there is no evidence yet that it is needed. If a real DAW
+  session with several instances shows meaningful CPU pressure, that is the
+  signal to revisit ADR-005's optimizations one at a time, each verified
+  against `Tests/BaselineRegressionTests.cpp` before/after.
+
+- **Character (Natural/Vivid/Deep) intensity and quality** (see
+  `docs/commercial-upgrade/decisions/ADR-006-character.md`): Vivid/Deep's
+  attenuation/cutoff/delay numbers are new values chosen to progress
+  sensibly from Natural (which is deliberately this plugin's original fixed
+  sound, unchanged), not values verified by listening. Whether Vivid feels
+  meaningfully different from Deep, whether either sounds musically useful
+  rather than just "more filtered," and whether the single-pole cutoff
+  shift is a strong enough spectral cue (the spec's §6.2 high-shelf/
+  presence EQ was deliberately not implemented - see the ADR) all need real
+  ears on real source material.
+
+
 - **Bypass toggle audibility** (see `docs/commercial-upgrade/decisions/ADR-001-bypass-continuity.md`):
   Phase 1 fixed the engine's internal state freezing during bypass (orbit
   phase, filters, and smoothers now keep advancing on a scratch buffer), but
