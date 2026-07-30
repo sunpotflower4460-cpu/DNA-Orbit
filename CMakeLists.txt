@@ -162,4 +162,17 @@ if (DNA_ORBIT_BUILD_TOOLS)
         juce::juce_audio_processors
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
+
+    # Developer/demo tool: renders short WAV files (dry + processed through a
+    # real factory preset) of a synthesized pad and a synthesized "vocal-ish"
+    # tone, so the effect can actually be listened to. Not part of the
+    # shipped plugin.
+    add_executable(DNAOrbitRenderAudioSample Tools/RenderAudioSample.cpp)
+    target_include_directories(DNAOrbitRenderAudioSample PRIVATE Source)
+    target_link_libraries(DNAOrbitRenderAudioSample PRIVATE
+        DNAOrbit
+        juce::juce_audio_processors
+        juce::juce_audio_formats
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
 endif()
