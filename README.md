@@ -42,17 +42,68 @@ mode; polarity inversion is never used to create the "empty centre" effect.
 | Intended use | Everyday music production | Deliberate, occasional sound-design effect |
 
 When NULL CORE is switched on, the UI shows a persistent red warning —
-**"NULL CORE — MONO MAY DISAPPEAR"** — both in the top bar and inside the
-orbit display. Switching NULL CORE on/off crossfades over ~120 ms to avoid
-clicks. The **Core** knob (adds a centred copy of the source into the Wet
+**「NULL CORE — モノラルで消える可能性があります」** — and the toggle itself is
+red. The warning tracks the *parameter*, so it stays correct under host
+automation and preset loads, not just UI clicks. Switching NULL CORE on/off
+crossfades over ~120 ms to avoid clicks. The **Core** knob (adds a centred copy of the source into the Wet
 signal) has no audible effect while NULL CORE is on, since NULL CORE removes
 exactly the Mid content Core would add — this is expected, not a bug.
 
-## 3. Parameters
+## 3. The interface
+
+The window is split into a 基本 (Basic) tab and a 詳細 (Detail) tab, with the
+3D visualiser always visible between them. UI text is Japanese.
+
+**基本 (Basic)** — four knobs only, plus action-named presets:
+
+| Label | Parameter | Meaning |
+|---|---|---|
+| 速さ | `rate` | How long one revolution takes |
+| 広がり | `radius` | Left/right spread |
+| 立体感 | `depth` | Front/back depth |
+| 効果量 | `mix` | Blend against the dry signal |
+
+Presets are named after what they do rather than what they are — 
+ボーカルを広げる / パッドを回す / ギターに揺らぎ / シンセを速く回す /
+実験:中心を消す — so the plugin is usable before touching a knob.
+
+**詳細 (Detail)** — テンポ同期 + 分割, 対称性, ねじれ, 中心の芯, 出力,
+音量自動補正, and NULL CORE (marked in red). Every control has a Japanese
+tooltip.
+
+### The 3D visualiser
+
+The double helix is **not decoration: it is the true time-history of the two
+strands' (x, z) positions.** The vertical axis is time, x is pan, z is
+front/back depth. Two antipodal points rotating over time trace a double helix
+as a matter of geometry, so the DNA shape falls out of the actual physics.
+It reuses the same `OrbitMath` functions the audio path uses.
+
+This makes the "+/- rotating, centre = 0" behaviour directly visible:
+
+- The **centre line** is the running midpoint of the two strands, drawn over a
+  dead-straight reference axis. At Symmetry 100% it sits exactly on that
+  reference; below 100% it visibly waves off it and turns orange.
+- The **readout** shows the physics literally — e.g. `A +0.069 / B -0.069 /
+  中心 0.0000` when locked, versus `A -0.247 / B -0.797 / 中心 -0.5223` with
+  103° of phase error when drifting.
+- The **top-down inset** shows the true instantaneous orbit (an ellipse, since
+  only x is scaled by Radius) with A and B antipodal, plus a trail of the
+  centroid's wander.
+
+Rendering is real 3D geometry — perspective projection, per-segment depth
+sorting, shaded sphere sprites with specular and rim lighting — rasterised
+through JUCE's normal 2D API. That means Direct2D on Windows and CoreGraphics
+on macOS, i.e. GPU-composited, **without ever creating an OpenGL context** and
+so without the context-loss and DAW-conflict failures that come with one.
+Frame cost is measured at runtime and quality steps down automatically if it
+exceeds budget.
+
+## 4. Parameters
 
 | Parameter | ID | Range | Default | Notes |
 |---|---|---|---|---|
-| Rate | `rate` | 0.02 – 4.0 Hz | 0.12 Hz | Orbit speed (log-skewed control) |
+| Rate | `rate` | 0.02 – 4.0 Hz | 0.12 Hz | Orbit speed (log-skewed). Displayed as seconds-per-revolution (`8.33秒/周`), which is far more intuitive for a slow orbit than Hz |
 | Sync | `sync` | on/off | off | When on, Rate is derived from host tempo + Division |
 | Sync Division | `division` | 4 bars / 2 bars / 1 bar / 1/2 / 1/4 / 1/8 | 1 bar | Cycle length in beats when Sync is on |
 | Radius | `radius` | 0 – 100% | 80% | Left/right spread of both strands |
@@ -63,20 +114,51 @@ exactly the Mid content Core would add — this is expected, not a bug.
 | Null Core | `nullCore` | on/off | **off** | See section 2 above |
 | Mix | `mix` | 0 – 100% | 35% | Equal-power Dry/Wet |
 | Output | `output` | -12 – +6 dB | 0 dB | Final output trim |
+| Auto Gain | `autoGain` | on/off | **on** | Level-matches Wet to Dry so moving Mix does not change perceived loudness |
 
 When host tempo is unavailable while Sync is on, the plugin falls back
 safely to the free-running Rate knob rather than guessing a tempo.
 
-### Factory presets (reference values — not stored as DAW-loadable preset
-files in v1; dial these in manually or use as automation starting points)
+### Presets
 
-- **Stable Helix** — Rate 0.10 Hz, Radius 75%, Depth 45%, Symmetry 100%, Twist 4 ms, Core 0%, Mix 30%, Null Core off
-- **Wide DNA** — Rate 0.18 Hz, Radius 100%, Depth 65%, Symmetry 100%, Twist 7 ms, Core 10%, Mix 45%
-- **Living Axis** — Rate 0.08 Hz, Radius 80%, Depth 60%, Symmetry 88%, Twist 6 ms, Core 15%, Mix 40%
-- **Hollow Core** — Rate 0.06 Hz, Radius 100%, Depth 70%, Symmetry 100%, Twist 9 ms, Core 0%, Mix 45%
-- **Null Experiment** — Rate 0.04 Hz, Radius 100%, Depth 50%, Symmetry 100%, Twist 8 ms, Core 0%, Mix 30%, Null Core **on**
+Selectable from the プリセット menu in the 基本 tab. They set the parameters
+directly; the values are then saved with the project like any other setting.
 
-## 4. Signal flow
+| Preset | Rate | Radius | Depth | Symmetry | Twist | Core | Mix | Null Core |
+|---|---|---|---|---|---|---|---|---|
+| ボーカルを広げる | 0.10 Hz | 75% | 45% | 100% | 4 ms | 10% | 30% | off |
+| パッドを回す | 0.18 Hz | 100% | 65% | 100% | 7 ms | 10% | 45% | off |
+| ギターに揺らぎ | 0.08 Hz | 80% | 60% | 88% | 6 ms | 15% | 40% | off |
+| シンセを速く回す | 0.60 Hz | 90% | 70% | 100% | 8 ms | 0% | 40% | off |
+| 実験:中心を消す | 0.04 Hz | 100% | 50% | 100% | 8 ms | 0% | 30% | **on** |
+
+### Level matching (Auto Gain)
+
+Measured, the raw wet path sits about **7 dB below dry** at defaults (about
+10 dB for wide stereo input) and swings to roughly **+4 dB** at Core 100%, so
+raising Mix used to lower the perceived level and made A/B comparison
+misleading.
+
+Auto Gain (on by default) cancels this with a gain derived purely from the
+current geometry — it is **deterministic, not an RMS follower, so it cannot
+pump**. Each channel carries three copies of the source at different delays
+(strand A, strand B, and the undelayed Core), so the estimate sums their
+powers plus the pairwise cross terms, weighted by a coherence factor from each
+pair's delay difference.
+
+Measured result across an 81-point radius/depth/twist/core sweep: worst
+deviation **-1.20 dB**; a tonal source lands at **-0.18 dB**. Two deliberate
+exceptions, both documented rather than papered over:
+
+- **NULL CORE is not compensated.** That mode is meant to be able to almost
+  vanish in mono; for near-mono material the required boost would be unbounded.
+- **Wide/uncorrelated stereo input stays ~3.6 dB down**, because the wet path
+  is built from the mono downmix and the compensation is signal-independent by
+  design.
+
+Switch Auto Gain off in the 詳細 tab to get the raw, uncompensated wet level.
+
+## 5. Signal flow
 
 ```
 Input
@@ -103,7 +185,7 @@ Stereo input uses `Mid = 0.5*(L+R)` as the source signal for both strands
 and the Core signal; Dry keeps the original L/R. Mono input uses the mono
 signal directly for both Dry and Wet.
 
-## 5. Building on macOS
+## 6. Building on macOS
 
 Requirements: Xcode command line tools, CMake ≥ 3.22.
 
@@ -134,7 +216,7 @@ cmake -S . -B build -DFETCHCONTENT_SOURCE_DIR_JUCE=$(pwd)/JUCE
 
 Formats built: **Standalone**, **VST3**, **AU** (AU only builds on macOS).
 
-## 6. Building on Windows
+## 7. Building on Windows
 
 Requirements: Visual Studio 2022 (Desktop C++ workload), CMake ≥ 3.22.
 
@@ -148,15 +230,15 @@ ctest --test-dir build -C Release --output-on-failure
 
 Formats built: **Standalone**, **VST3** (AU is not available on Windows).
 
-## 7. Building on Linux (used to validate this project during development)
+## 8. Building on Linux (used to validate this project during development)
 
 Requires ALSA, X11, FreeType/Fontconfig, and GTK3 development packages
 (`libasound2-dev libjack-jackd2-dev libcurl4-openssl-dev libfreetype6-dev
 libx11-dev libxcomposite-dev libxcursor-dev libxext-dev libxinerama-dev
-libxrandr-dev libxrender-dev libgtk-3-dev` on Debian/Ubuntu). Same commands
-as macOS above. Formats built: **Standalone**, **VST3** (no AU on Linux).
+libxrandr-dev libxrender-dev libgtk-3-dev` on Debian/Ubuntu), plus
+`fonts-noto-cjk` for the Japanese UI text. Same commands as macOS above. Formats built: **Standalone**, **VST3** (no AU on Linux).
 
-## 8. Testing
+## 9. Testing
 
 ```sh
 cmake --build build --config Release -j
@@ -179,8 +261,20 @@ built-in `UnitTest` framework:
 - **State** — full parameter round-trip through `getStateInformation` /
   `setStateInformation`, crash-safety against null/garbage/empty state data,
   bus-layout support/rejection, bypass pass-through.
+- **LevelMatch** — the 81-point Auto Gain sweep described above, Auto Gain
+  off restoring the raw level, the correlation meter against known
+  mono/inverted signals, and the RMS meter returning to zero on silence.
+  Driven with pink noise rather than white: the Depth low-pass has unity DC
+  gain but removes real energy from a broadband signal, and white noise
+  exaggerates that far beyond any real programme material.
+- **Geometry** — that the helix's stored shape is identical at 0.02 Hz and
+  4 Hz (measured difference: 0.0 rad), that `phi == pi` puts the centroid at
+  zero for every stored sample (residual 1.7e-15, the floating-point floor),
+  that a phase error visibly displaces it, that a long message-thread stall
+  resynthesises rather than looping, and that the projection fits inside the
+  component at every supported window size and never folds over.
 
-## 9. Where the build output lands
+## 10. Where the build output lands
 
 After `cmake --build build --config Release`:
 
@@ -189,11 +283,11 @@ After `cmake --build build --config Release`:
 - VST3: `build/DNAOrbit_artefacts/Release/VST3/DNA Orbit.vst3`
 - AU (macOS only): `build/DNAOrbit_artefacts/Release/AU/DNA Orbit.component`
 
-## 10. JUCE version
+## 11. JUCE version
 
 **8.0.15**, pinned via `GIT_TAG` in `CMakeLists.txt`'s `FetchContent_Declare`.
 
-## 11. Licensing
+## 12. Licensing
 
 See `LICENSE_NOTES.md`. JUCE is dual-licensed (AGPLv3/free tiers vs. paid
 Indie/Pro tiers); **confirm which tier applies before distributing a built
@@ -202,7 +296,7 @@ attribution) differ between tiers. This build deliberately leaves JUCE's
 splash-screen requirement at its default (enabled), matching the free
 tiers' terms.
 
-## 12. Known limitations
+## 13. Known limitations
 
 - **Built and tested on Linux in this environment** (VST3 + Standalone
   only — AU is macOS-only and could not be built or verified here). The
@@ -210,28 +304,70 @@ tiers' terms.
   but neither macOS nor Windows builds were exercised in this session; use
   the build commands above to verify on those platforms.
 - No `pluginval` or DAW was available in this environment, so validation is
-  limited to the automated CTest suite plus a headless Standalone launch
-  under Xvfb (confirmed it starts and stays running without crashing; no
-  audio device was present in the container to exercise a live audio path).
-- Factory presets are documented as reference parameter values (section 3)
-  rather than shipped as loadable preset files in this v1.
+  limited to the automated CTest suite plus headless screenshot rendering.
+- **This container has no audio device, so the Standalone build's visualiser
+  is frozen** — with no audio callback, `processBlock` never runs and the
+  orbit phase never advances. That is an environment limitation, not a
+  plugin bug. The `RenderShots` tool (below) exists to work around it, and
+  is what was used to verify the animated locked/drifting behaviour.
+- Presets are applied from the UI menu; they are not exposed as DAW
+  program-change slots (`getNumPrograms()` is still 1).
+- Japanese text needs a Japanese font installed. macOS (Hiragino) and
+  Windows (Yu Gothic UI) have one by default; on Linux install
+  `fonts-noto-cjk`, otherwise the labels fall back to a face with no CJK
+  coverage.
 - Sync Division assumes a 4/4 time signature when converting bars to beats.
-- The back-position filter/delay/gain model (section 4) is a set of
+- The back-position filter/delay/gain model (section 5) is a set of
   perceptual approximations, not a physically modelled 3D audio engine —
   by design, per the spec (no HRTF, no true binaural front/back cues).
+- The 3D view's vertical axis is time, not a third audio dimension. The
+  audio itself uses only pan (x) and the front/back cues (z).
+- Auto Gain does not compensate NULL CORE, and leaves wide/uncorrelated
+  stereo input about 3.6 dB down — both deliberate, see section 4.
+- Renderer performance was measured only on this container's software
+  rasteriser. On macOS/Windows the same code runs on CoreGraphics/Direct2D
+  and should be faster, but that has not been measured on real hardware.
 
-## 13. Manual checks to run in a real DAW before shipping
+### Developer tool: `RenderShots`
+
+Renders editor screenshots headlessly by driving the processor directly and
+pumping the message loop, so the visualiser animates without an audio device:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DDNA_ORBIT_BUILD_TOOLS=ON
+cmake --build build --config Release -j --target DNAOrbitRenderShots
+./build/DNAOrbitRenderShots <output-directory>
+```
+
+It writes a locked shot, a detail-tab shot, two drift shots and a NULL CORE
+shot. Off by default (`DNA_ORBIT_BUILD_TOOLS=OFF`).
+
+## 14. Manual checks to run in a real DAW before shipping
 
 - [ ] Load in at least one DAW as VST3 (and AU, on macOS) and confirm the
-      plugin scans, loads, and its editor opens at 760×480, resizable down
-      to 640×400.
+      plugin scans, loads, and its editor opens at 900×620, resizable
+      between 780×540 and 1600×1100.
+- [ ] Confirm all Japanese text renders correctly (no boxes or garbled
+      characters) on the target OS, at both small and large window sizes.
+- [ ] Switch between the 基本 and 詳細 tabs; confirm the selected tab and the
+      window size are restored after closing and reopening the editor.
+- [ ] Try each preset from the プリセット menu and confirm it sounds sensible
+      on the source it is named for.
+- [ ] Watch CPU while the editor is open vs closed, and with several
+      instances open at once — the visualiser stops its timer when hidden,
+      so confirm that actually happens in your host.
 - [ ] Automate Rate, Radius, Depth, Symmetry, Twist, Core, Mix, Output from
       the DAW and confirm no clicks/zippering.
 - [ ] Toggle Null Core repeatedly while playing audio; confirm the
       crossfade is click-free and the warning text appears/disappears.
-- [ ] Set Symmetry to 100%, watch the orbit display: the white centre dot
-      should sit still and "AXIS LOCKED" should show. Lower Symmetry and
-      confirm the dot visibly drifts and "AXIS DRIFT" (orange) appears.
+- [ ] Set 対称性 to 100% and watch the centre line: it should be dead
+      straight, sitting exactly on the reference axis, with 中心軸 固定 (0)
+      and a readout of A +x / B −x / 中心 0.0000. Lower it and confirm the
+      line visibly waves, turns orange, and the status becomes 中心軸 ゆらぎ.
+      Return it to 100% and confirm it re-locks smoothly within ~0.2 s
+      rather than snapping.
+- [ ] Toggle 音量自動補正 while playing and sweep 効果量 0→100%; with it on
+      the perceived level should stay put, with it off it should drop.
 - [ ] Sum a HELIX-mode mix to mono and confirm the signal does **not**
       disappear. Sum a NULL CORE mix to mono and confirm the Wet portion
       **does** collapse toward silence while Dry (if Mix < 100%) remains.

@@ -30,11 +30,17 @@ namespace dnaorbit::ui
         static constexpr double pitch = 2.0 * scaleY / visibleTurns;
 
         /**
-         * Screen y stays strictly monotonic in age - no fold-over, no ribbon cusps,
-         * well-behaved depth ordering - only while
+         * The tilted height y' stays strictly monotonic in age - so the helix never
+         * folds back on itself - only while
          *     dy'/dy = cos(a) - sin(a) * max|dz/dy| > 0,  max|dz/dy| = 2*pi / pitch
          * i.e. below atan(pitch / 2*pi). With the pitch above that is ~16.3 degrees,
          * so 13 degrees ships with a comfortable margin.
+         *
+         * Note this bounds y' BEFORE the perspective divide. Dividing by a varying
+         * depth adds microscopic flat spots to the final screen y (measured worst
+         * backward step ~7e-5 normalised, well under a tenth of a pixel). That is
+         * harmless: depth ordering is done on viewZ rather than screen y, and
+         * degenerate ribbon tangents are guarded by a segment-length check.
          */
         static double criticalTiltRadians() noexcept
         {
