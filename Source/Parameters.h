@@ -21,6 +21,7 @@ namespace dnaorbit::params
     inline constexpr const char* mixID      = "mix";
     inline constexpr const char* outputID   = "output";
     inline constexpr const char* autoGainID = "autoGain";
+    inline constexpr const char* stereoPreserveID = "stereoPreserve";
 
     /**
      * State schema version, stored as a property on apvts.state (alongside
@@ -29,6 +30,14 @@ namespace dnaorbit::params
      *
      *   1 - baseline: the 12 parameters above, Wet built from a mono (M-only)
      *       downmix, no stereo-preserving source model.
+     *   2 - adds Stereo Preserve (stereoPreserveID): Wet's per-strand source
+     *       becomes M +/- p*S instead of a shared mono M downmix, fixing
+     *       anti-phase stereo input collapsing Wet to silence. A schema-1
+     *       save has no stereoPreserve PARAM node at all (it didn't exist
+     *       yet), so it is force-set to 0 on load to exactly reproduce the
+     *       schema-1 sound (see PluginProcessor::setStateInformation and
+     *       Tests/BaselineRegressionTests.cpp). A genuinely fresh instance
+     *       (nothing loaded) gets the parameter's declared default instead.
      *
      * Bump this whenever a new schema version changes how a *missing* schema
      * property (i.e. a project saved by an older build) should be
@@ -36,7 +45,20 @@ namespace dnaorbit::params
      * defaults safely on its own. See PluginProcessor::setStateInformation.
      */
     inline constexpr const char* schemaVersionPropertyID = "dnaOrbitSchemaVersion";
-    inline constexpr int currentStateSchemaVersion = 1;
+    inline constexpr int currentStateSchemaVersion = 2;
+
+    /**
+     * A save with no schemaVersion attribute at all predates the property
+     * itself (it did not exist before schema 1), so it is schema 1 by
+     * definition - a fixed historical fact, NOT "whatever the current
+     * version happens to be". Do not use currentStateSchemaVersion as that
+     * fallback: it will keep incrementing, but a missing attribute always
+     * means schema 1.
+     */
+    inline constexpr int legacyUnversionedSchema = 1;
+
+    /** Schema version at which stereoPreserveID first existed; see above. */
+    inline constexpr int stereoPreserveIntroducedInSchema = 2;
 
     /**
      * Editor-only state (which tab is showing, window size) lives in its own
@@ -54,6 +76,17 @@ namespace dnaorbit::params
     inline constexpr float rateMinHz = 0.02f;
     inline constexpr float rateMaxHz = 4.0f;
     inline constexpr float rateDefaultHz = 0.12f;
+
+    // A fresh instance defaults to 70%: the centre-at-zero geometry is
+    // identical at every Stereo Preserve value (it depends only on the two
+    // strands staying antipodal, not on what feeds them), so there is no
+    // physical trade-off in picking a higher default - it just better
+    // expresses "two distinct strands" and incidentally fixes anti-phase
+    // stereo input collapsing Wet to silence. A project saved before this
+    // parameter existed (schema 1) is force-set to 0 instead, to exactly
+    // reproduce its original sound - see currentStateSchemaVersion above.
+    inline constexpr float stereoPreserveDefaultPercent = 70.0f;
+    inline constexpr float stereoPreserveLegacyPercent = 0.0f;
 
     inline const juce::StringArray syncDivisionChoices {
         "4 bars", "2 bars", "1 bar", "1/2", "1/4", "1/8"
@@ -163,6 +196,14 @@ namespace dnaorbit::params
         // raw, uncompensated wet level.
         paramList.push_back (std::make_unique<juce::AudioParameterBool> (
             juce::ParameterID { autoGainID, 1 }, "Auto Gain", true));
+
+        // 0% = both strands (and Core) fed from a shared Mid downmix, the
+        // schema-1 behaviour. 100% = Strand A/B fed directly from L/R. See
+        // HelixEngine::process() and the schema-version doc comment above.
+        paramList.push_back (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { stereoPreserveID, 1 }, "Stereo Preserve",
+            juce::NormalisableRange<float> (0.0f, 100.0f, 0.01f), stereoPreserveDefaultPercent,
+            juce::AudioParameterFloatAttributes().withLabel ("%")));
 
         return { paramList.begin(), paramList.end() };
     }

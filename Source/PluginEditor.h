@@ -69,7 +69,7 @@ private:
     Knob rateKnob, radiusKnob, depthKnob, mixKnob;
 
     // Detail page.
-    Knob symmetryKnob, twistKnob, coreKnob, outputKnob;
+    Knob symmetryKnob, twistKnob, coreKnob, outputKnob, stereoPreserveKnob;
     juce::ToggleButton syncButton;
     juce::ComboBox divisionBox;
     juce::Label divisionLabel;

@@ -25,14 +25,18 @@ namespace dnaorbit::presets
         float mix;
         float output;
         bool  autoGain;
+        // Matches the shipped product default (Parameters.h) for every
+        // factory preset; not perceptually re-tuned per preset since that
+        // needs real listening (see MANUAL_REQUIRED.md), not a guess.
+        float stereoPreserve;
     };
 
     inline const Preset presets[] = {
-        { "ボーカルを広げる", 0.10f, false, 2,  75.0f, 45.0f, 100.0f, 4.0f, 10.0f, false, 30.0f, 0.0f, true },
-        { "パッドを回す",     0.18f, false, 2, 100.0f, 65.0f, 100.0f, 7.0f, 10.0f, false, 45.0f, 0.0f, true },
-        { "ギターに揺らぎ",   0.08f, false, 2,  80.0f, 60.0f,  88.0f, 6.0f, 15.0f, false, 40.0f, 0.0f, true },
-        { "シンセを速く回す", 0.60f, false, 2,  90.0f, 70.0f, 100.0f, 8.0f,  0.0f, false, 40.0f, 0.0f, true },
-        { "実験:中心を消す", 0.04f, false, 2, 100.0f, 50.0f, 100.0f, 8.0f,  0.0f, true,  30.0f, 0.0f, true },
+        { "ボーカルを広げる", 0.10f, false, 2,  75.0f, 45.0f, 100.0f, 4.0f, 10.0f, false, 30.0f, 0.0f, true, 70.0f },
+        { "パッドを回す",     0.18f, false, 2, 100.0f, 65.0f, 100.0f, 7.0f, 10.0f, false, 45.0f, 0.0f, true, 70.0f },
+        { "ギターに揺らぎ",   0.08f, false, 2,  80.0f, 60.0f,  88.0f, 6.0f, 15.0f, false, 40.0f, 0.0f, true, 70.0f },
+        { "シンセを速く回す", 0.60f, false, 2,  90.0f, 70.0f, 100.0f, 8.0f,  0.0f, false, 40.0f, 0.0f, true, 70.0f },
+        { "実験:中心を消す", 0.04f, false, 2, 100.0f, 50.0f, 100.0f, 8.0f,  0.0f, true,  30.0f, 0.0f, true, 70.0f },
     };
 
     inline constexpr int numPresets = (int) (sizeof (presets) / sizeof (presets[0]));
@@ -61,6 +65,7 @@ namespace dnaorbit::presets
         set (params::mixID, preset.mix);
         set (params::outputID, preset.output);
         set (params::autoGainID, preset.autoGain ? 1.0f : 0.0f);
+        set (params::stereoPreserveID, preset.stereoPreserve);
     }
 
     /**
@@ -93,6 +98,7 @@ namespace dnaorbit::presets
             && isOn (params::nullCoreID, preset.nullCore)
             && isClose (params::mixID, preset.mix)
             && isClose (params::outputID, preset.output)
-            && isOn (params::autoGainID, preset.autoGain);
+            && isOn (params::autoGainID, preset.autoGain)
+            && isClose (params::stereoPreserveID, preset.stereoPreserve);
     }
 }

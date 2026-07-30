@@ -68,8 +68,8 @@ Presets are named after what they do rather than what they are —
 実験:中心を消す — so the plugin is usable before touching a knob.
 
 **詳細 (Detail)** — テンポ同期 + 分割, 対称性, ねじれ, 中心の芯, 出力,
-音量自動補正, and NULL CORE (marked in red). Every control has a Japanese
-tooltip.
+ステレオ保持, 音量自動補正, and NULL CORE (marked in red). Every control has a
+Japanese tooltip.
 
 ### The 3D visualiser
 
@@ -115,19 +115,51 @@ exceeds budget.
 | Mix | `mix` | 0 – 100% | 35% | Equal-power Dry/Wet |
 | Output | `output` | -12 – +6 dB | 0 dB | Final output trim |
 | Auto Gain | `autoGain` | on/off | **on** | Level-matches Wet to Dry so moving Mix does not change perceived loudness |
+| Stereo Preserve | `stereoPreserve` | 0 – 100% | **70%** (0% for projects saved before this parameter existed) | How much of the input's Mid/Side stereo image feeds the two strands and Core, instead of a shared Mid-only downmix. See below |
 
 When host tempo is unavailable while Sync is on, the plugin falls back
 safely to the free-running Rate knob rather than guessing a tempo.
+
+### Stereo Preserve
+
+Before this parameter existed, both strands (and Core) were fed from a
+single Mid downmix (`0.5 * (L + R)`), which meant a strongly anti-phase
+stereo source (`L ≈ -R`) collapsed the Wet signal toward silence, and a wide
+stereo source lost its left/right identity on the way in.
+
+`stereoPreserve` (`p`, 0-1) mixes each strand's source between that shared
+Mid and the input's own Mid/Side split:
+
+```
+M = 0.5 * (L + R)
+S = 0.5 * (L - R)
+sourceA = M + p * S     // Strand A, and Core's left channel
+sourceB = M - p * S     // Strand B, and Core's right channel
+```
+
+At `p = 0` this is exactly the old shared-Mid behaviour (including the
+anti-phase-collapses-to-silence case). At `p = 1`, Strand A is fed directly
+from L and Strand B from R. Mono input (`L == R`) is unaffected at any `p`,
+since Side is always 0.
+
+**Compatibility**: a project saved before this parameter existed (state
+schema 1) has no `stereoPreserve` node in its saved XML at all. Loading it
+forces `stereoPreserve` to 0% rather than the new 70% default, so the
+project reproduces its original sound exactly — see
+`Tests/BaselineRegressionTests.cpp` for the pinned numeric fingerprints and
+`docs/commercial-upgrade/decisions/ADR-003-stereo-preserve.md` for the full
+design rationale, including why the spec's proposed extra loudness-matching
+normalizer for this knob was deliberately left out of this phase.
 
 ### Presets
 
 Selectable from the プリセット menu in the 基本 tab. Defined in
 `Source/Presets.h` (GUI-independent, unit-tested) as a point in the full
-12-parameter space — Sync, Division, Output and Auto Gain are set
-explicitly by every preset (Sync off, Division 1 bar, Output 0 dB, Auto Gain
-on, unless noted below), so choosing a preset is deterministic: the result
-never depends on what was set before. The values are then saved with the
-project like any other setting.
+13-parameter space — Sync, Division, Output, Auto Gain and Stereo Preserve
+are set explicitly by every preset (Sync off, Division 1 bar, Output 0 dB,
+Auto Gain on, Stereo Preserve 70%, unless noted below), so choosing a preset
+is deterministic: the result never depends on what was set before. The
+values are then saved with the project like any other setting.
 
 Once you nudge anything after picking a preset, a 元に戻す (Revert) button
 appears next to the menu to snap back to the preset's exact values.
@@ -270,12 +302,19 @@ built-in `UnitTest` framework:
   `setStateInformation`, crash-safety against null/garbage/empty state data,
   bus-layout support/rejection, bypass pass-through (including the oversized-
   block fallback), bypass keeping the engine's orbit phase advancing instead
-  of freezing it, state schema versioning, and migrating a pre-Phase-1
-  project's flat editor-state properties into their own `uiState` node.
-- **Presets** — every factory preset sets all 12 parameters the same way
+  of freezing it, state schema versioning, migrating a pre-Phase-1 project's
+  flat editor-state properties into their own `uiState` node, a fresh
+  instance defaulting Stereo Preserve to 70%, and a schema-1 project loading
+  with it forced to 0% instead.
+- **Presets** — every factory preset sets all 13 parameters the same way
   regardless of prior state (determinism), the Modified indicator matching
   right after applying a preset and going false once nudged, and Revert
   (re-apply) restoring the matched state.
+- **StereoPreserve** — 0% still collapses anti-phase input to silence
+  (legacy path unaffected), above 0% keeps it audible, Wet level scales
+  linearly with the parameter for anti-phase input, mono input is
+  unaffected at any value, 100% ties Strand/Core content to its originating
+  channel, and parameter automation is smoothed rather than stepped.
 - **LevelMatch** — the 81-point Auto Gain sweep described above, Auto Gain
   off restoring the raw level, the correlation meter against known
   mono/inverted signals, and the RMS meter returning to zero on silence.

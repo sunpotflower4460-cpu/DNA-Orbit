@@ -19,6 +19,7 @@ namespace dnaorbit::dsp
         nullCoreMixSmoothed.reset (sampleRate, nullCoreSeconds);
         rateHzSmoothed.reset (sampleRate, smoothParamSeconds);
         autoGainAmountSmoothed.reset (sampleRate, nullCoreSeconds);
+        stereoPreserveSmoothed.reset (sampleRate, smoothParamSeconds);
 
         lowPassA.prepare (sampleRate);
         lowPassB.prepare (sampleRate);
@@ -63,6 +64,7 @@ namespace dnaorbit::dsp
         nullCoreMixSmoothed.setCurrentAndTargetValue (nullCoreMixSmoothed.getCurrentValue());
         rateHzSmoothed.setCurrentAndTargetValue (rateHzSmoothed.getCurrentValue());
         autoGainAmountSmoothed.setCurrentAndTargetValue (autoGainAmountSmoothed.getCurrentValue());
+        stereoPreserveSmoothed.setCurrentAndTargetValue (stereoPreserveSmoothed.getCurrentValue());
 
         uiThetaA.store (0.0f, std::memory_order_relaxed);
         uiThetaB.store ((float) orbitmath::pi, std::memory_order_relaxed);
@@ -111,6 +113,7 @@ namespace dnaorbit::dsp
         const float core01     = sanitizeParam (p.core01, 0.0f);
         const float mix01      = sanitizeParam (p.mix01, 0.35f);
         const float outputDb   = sanitizeParam (p.outputDb, 0.0f);
+        const float stereoPreserve01 = std::clamp (sanitizeParam (p.stereoPreserve01, 0.0f), 0.0f, 1.0f);
 
         nullCoreTarget = p.nullCore;
 
@@ -135,6 +138,7 @@ namespace dnaorbit::dsp
             mixSmoothed.setCurrentAndTargetValue (mix01);
             outputGainSmoothed.setCurrentAndTargetValue (outputGain);
             nullCoreMixSmoothed.setCurrentAndTargetValue (nullCoreAmount);
+            stereoPreserveSmoothed.setCurrentAndTargetValue (stereoPreserve01);
         }
         else
         {
@@ -148,6 +152,7 @@ namespace dnaorbit::dsp
             mixSmoothed.setTargetValue (mix01);
             outputGainSmoothed.setTargetValue (outputGain);
             nullCoreMixSmoothed.setTargetValue (nullCoreAmount);
+            stereoPreserveSmoothed.setTargetValue (stereoPreserve01);
         }
 
         uiNullCoreOn.store (p.nullCore, std::memory_order_relaxed);
@@ -185,6 +190,7 @@ namespace dnaorbit::dsp
             const float nullCoreAmount = nullCoreMixSmoothed.getNextValue();
             const float rateHz   = rateHzSmoothed.getNextValue();
             const float autoGainAmount = autoGainAmountSmoothed.getNextValue();
+            const float stereoPreserve = stereoPreserveSmoothed.getNextValue();
 
             // Sanitized at the single point audio enters the engine: the two
             // one-pole filters below are recursive (state depends on the
@@ -197,9 +203,22 @@ namespace dnaorbit::dsp
             // (sin/cos/exp/clamp) stays finite.
             const float sampleInL = std::isfinite (inL[n]) ? inL[n] : 0.0f;
             const float sampleInR = stereoIn ? (std::isfinite (inR[n]) ? inR[n] : 0.0f) : sampleInL;
-            const float wetSource = stereoIn ? 0.5f * (sampleInL + sampleInR) : sampleInL;
             const float dryL = sampleInL;
             const float dryR = sampleInR;
+
+            // --- Stereo Preserve: M/S source split for the two strands -----------
+            // mid/side of a mono-duplicated input (stereoIn == false) always
+            // gives side == 0, so sourceA == sourceB == mid regardless of
+            // stereoPreserve - mono input is unaffected by this parameter.
+            // At stereoPreserve == 0, sourceA == sourceB == mid for ANY input,
+            // which is exactly the old shared-mono-downmix Wet source: this is
+            // what makes stereoPreserve == 0 reproduce the schema-1 sound
+            // (including anti-phase input collapsing Wet to silence), see
+            // Tests/BaselineRegressionTests.cpp.
+            const float mid  = stereoIn ? 0.5f * (sampleInL + sampleInR) : sampleInL;
+            const float side = stereoIn ? 0.5f * (sampleInL - sampleInR) : 0.0f;
+            const float sourceA = mid + stereoPreserve * side;
+            const float sourceB = mid - stereoPreserve * side;
 
             // --- Orbit angle update -------------------------------------------------
             const double incA = orbitmath::angularIncrement ((double) rateHz, sampleRate);
@@ -257,7 +276,7 @@ namespace dnaorbit::dsp
             const float backGainA = dbToGain (gainDbA);
             const float cutoffA = frontCutoffHz + (backCutoffHz - frontCutoffHz) * (float) backAmountA * depth;
             lowPassA.setCutoffHz (cutoffA);
-            const float filteredA = lowPassA.processSample (wetSource * backGainA);
+            const float filteredA = lowPassA.processSample (sourceA * backGainA);
 
             const float backDelayMsA = maxBackDelayMs * (float) backAmountA * depth;
             const float delaySamplesA = std::clamp ((backDelayMsA * 0.001f) * (float) sampleRate, 0.0f, maxDelaySamplesStored - 1.0f);
@@ -276,7 +295,7 @@ namespace dnaorbit::dsp
             const float backGainB = dbToGain (gainDbB);
             const float cutoffB = frontCutoffHz + (backCutoffHz - frontCutoffHz) * (float) backAmountB * depth;
             lowPassB.setCutoffHz (cutoffB);
-            const float filteredB = lowPassB.processSample (wetSource * backGainB);
+            const float filteredB = lowPassB.processSample (sourceB * backGainB);
 
             const float backDelayMsB = maxBackDelayMs * (float) backAmountB * depth;
             const float delaySamplesB = std::clamp (((backDelayMsB + twistMs) * 0.001f) * (float) sampleRate, 0.0f, maxDelaySamplesStored - 1.0f);
@@ -293,9 +312,12 @@ namespace dnaorbit::dsp
             float wetL = strandAL + strandBL;
             float wetR = strandAR + strandBR;
 
-            const float coreSignal = wetSource * core;
-            wetL += coreSignal;
-            wetR += coreSignal;
+            // Core follows Stereo Preserve too: lerp(mid, L, stereoPreserve) is
+            // exactly sourceA (and lerp(mid, R, stereoPreserve) is sourceB), so
+            // Core's image width matches the strands' rather than always being
+            // a mono blob re-duplicated to both channels.
+            wetL += sourceA * core;
+            wetR += sourceB * core;
 
             const auto nulled = nullCoreProcess (wetL, wetR);
             wetL += (nulled.left  - wetL) * nullCoreAmount;

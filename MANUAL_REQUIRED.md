@@ -69,6 +69,17 @@ real vocal/pad/guitar material. Nothing here substitutes automated DSP tests
 (which do run, and do check the numeric claims — e.g. anti-phase no longer
 silencing Wet, Mix-sweep RMS deviation bounds) for actually listening.
 
+- **Stereo Preserve perceived loudness** (see `docs/commercial-upgrade/decisions/ADR-003-stereo-preserve.md`):
+  Phase 2 added the `stereoPreserve` parameter (default 70% for new
+  instances) so anti-phase and wide stereo input no longer collapse Wet
+  toward silence. The spec's proposed extra loudness-matching normalizer for
+  this specific knob was deliberately NOT implemented (it would have
+  conflicted with the schema-1 byte-identical-legacy requirement at its
+  literal values). If real listening finds moving Stereo Preserve noticeably
+  changes perceived Wet loudness, ADR-003 already has a concrete fallback
+  design (a relative normalizer anchored to 0 dB at 0%) ready to implement
+  as ADR-004.
+
 - **Bypass toggle audibility** (see `docs/commercial-upgrade/decisions/ADR-001-bypass-continuity.md`):
   Phase 1 fixed the engine's internal state freezing during bypass (orbit
   phase, filters, and smoothers now keep advancing on a scratch buffer), but

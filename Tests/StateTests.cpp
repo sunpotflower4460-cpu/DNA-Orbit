@@ -408,6 +408,81 @@ namespace
 
                 expect (processorB.apvts.state.getChildWithName ("uiState").isValid());
             }
+
+            beginTest ("A fresh instance defaults Stereo Preserve to 70%");
+            {
+                DNAOrbitAudioProcessor processor;
+                expectWithinAbsoluteError (
+                    processor.apvts.getRawParameterValue (dnaorbit::params::stereoPreserveID)->load(),
+                    70.0f, 1.0e-3f);
+            }
+
+            beginTest ("A schema-1 save (predating Stereo Preserve) loads with it forced to 0%, not the new default");
+            {
+                // Simulates a real project saved by a Phase-0/Phase-1 build:
+                // its XML has schemaVersion=1 and no stereoPreserve PARAM node
+                // at all, since the parameter did not exist yet. Without the
+                // schema-2 override, APVTS would fall back to the parameter's
+                // declared (current-product) default of 70%, silently
+                // changing that project's sound on load.
+                DNAOrbitAudioProcessor processorA;
+                juce::MemoryBlock savedState;
+                processorA.getStateInformation (savedState);
+
+                std::unique_ptr<juce::XmlElement> xml (juce::AudioProcessor::getXmlFromBinary (
+                    savedState.getData(), (int) savedState.getSize()));
+                expect (xml != nullptr);
+
+                if (xml != nullptr)
+                {
+                    xml->setAttribute (dnaorbit::params::schemaVersionPropertyID, 1);
+
+                    juce::XmlElement* stereoPreserveNode = nullptr;
+                    for (auto* child : xml->getChildIterator())
+                    {
+                        if (child->hasTagName ("PARAM")
+                            && child->getStringAttribute ("id") == dnaorbit::params::stereoPreserveID)
+                        {
+                            stereoPreserveNode = child;
+                            break;
+                        }
+                    }
+                    expect (stereoPreserveNode != nullptr, "Test setup: stereoPreserve PARAM node must exist to remove");
+                    if (stereoPreserveNode != nullptr)
+                        xml->removeChildElement (stereoPreserveNode, true);
+
+                    juce::MemoryBlock schema1State;
+                    juce::AudioProcessor::copyXmlToBinary (*xml, schema1State);
+
+                    DNAOrbitAudioProcessor processorB;
+                    processorB.setStateInformation (schema1State.getData(), (int) schema1State.getSize());
+
+                    expect (processorB.getLoadedSchemaVersion() == 1);
+                    expectWithinAbsoluteError (
+                        processorB.apvts.getRawParameterValue (dnaorbit::params::stereoPreserveID)->load(),
+                        0.0f, 1.0e-3f,
+                        "A schema-1 project must load with Stereo Preserve at 0%, reproducing its original sound");
+                }
+            }
+
+            beginTest ("A schema-2 save with a custom Stereo Preserve value round-trips unchanged");
+            {
+                DNAOrbitAudioProcessor processorA;
+                processorA.apvts.getParameter (dnaorbit::params::stereoPreserveID)->setValueNotifyingHost (0.42f);
+
+                juce::MemoryBlock savedState;
+                processorA.getStateInformation (savedState);
+
+                DNAOrbitAudioProcessor processorB;
+                processorB.setStateInformation (savedState.getData(), (int) savedState.getSize());
+
+                expect (processorB.getLoadedSchemaVersion() == dnaorbit::params::currentStateSchemaVersion);
+                expectWithinAbsoluteError (
+                    processorB.apvts.getRawParameterValue (dnaorbit::params::stereoPreserveID)->load(),
+                    processorA.apvts.getRawParameterValue (dnaorbit::params::stereoPreserveID)->load(),
+                    1.0e-3f,
+                    "A schema-2 save's chosen Stereo Preserve value must not be reset to 0 or the default");
+            }
         }
     };
 

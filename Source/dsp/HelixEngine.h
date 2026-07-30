@@ -36,6 +36,18 @@ namespace dnaorbit::dsp
             float mix01      = 0.35f;
             float outputDb   = 0.0f;
             bool  autoGain   = true;
+
+            /**
+             * 0 = both strands (and Core) are fed from a shared Mid downmix
+             * (the schema-1 behaviour: anti-phase stereo input collapses Wet
+             * to silence). 1 = Strand A/B are fed directly from L/R. Defaults
+             * to 0 here - the schema-1-compatible, source-independent
+             * default - so any caller that forgets to set it explicitly gets
+             * the old behaviour rather than a silent change; the actual
+             * product default of 70% lives in Parameters.h and is applied by
+             * PluginProcessor.
+             */
+            float stereoPreserve01 = 0.0f;
         };
 
         void prepare (double newSampleRate, int maximumBlockSize, int maxChannelsHint);
@@ -139,6 +151,7 @@ namespace dnaorbit::dsp
         juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> nullCoreMixSmoothed;
         juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> rateHzSmoothed;
         juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> autoGainAmountSmoothed;
+        juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> stereoPreserveSmoothed;
 
         bool  nullCoreTarget = false;
 

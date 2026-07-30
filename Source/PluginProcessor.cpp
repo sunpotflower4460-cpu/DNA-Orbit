@@ -48,6 +48,7 @@ DNAOrbitAudioProcessor::DNAOrbitAudioProcessor()
     mixParam      = apvts.getRawParameterValue (dnaorbit::params::mixID);
     outputParam   = apvts.getRawParameterValue (dnaorbit::params::outputID);
     autoGainParam = apvts.getRawParameterValue (dnaorbit::params::autoGainID);
+    stereoPreserveParam = apvts.getRawParameterValue (dnaorbit::params::stereoPreserveID);
 }
 
 void DNAOrbitAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
@@ -122,6 +123,7 @@ dnaorbit::dsp::HelixEngine::Parameters DNAOrbitAudioProcessor::currentParameterS
     p.mix01      = mixParam->load()      / 100.0f;
     p.outputDb   = outputParam->load();
     p.autoGain   = autoGainParam->load() > 0.5f;
+    p.stereoPreserve01 = stereoPreserveParam->load() / 100.0f;
     return p;
 }
 
@@ -202,15 +204,28 @@ void DNAOrbitAudioProcessor::setStateInformation (const void* data, int sizeInBy
         return;
 
     // A project saved before this property existed has no schemaVersion at
-    // all - that is, by definition, schema 1 (today's format), so missing
-    // defaults to 1 rather than 0. Read before replaceState: the source XML
-    // is the ground truth for what was actually saved, not any value already
-    // sitting on the live apvts.state.
+    // all - that is, by definition, schema 1 (today's format when the
+    // property was introduced), not "whatever the current version is".
+    // Read before replaceState: the source XML is the ground truth for what
+    // was actually saved, not any value already sitting on the live
+    // apvts.state.
     loadedSchemaVersion = xmlState->getIntAttribute (dnaorbit::params::schemaVersionPropertyID,
-                                                      dnaorbit::params::currentStateSchemaVersion);
+                                                      dnaorbit::params::legacyUnversionedSchema);
 
     apvts.replaceState (juce::ValueTree::fromXml (*xmlState));
     migrateLegacyUiState (apvts.state);
+
+    // Stereo Preserve did not exist before schema 2: a schema-1 save has no
+    // stereoPreserve PARAM node at all, so APVTS already fell back to the
+    // parameter's declared (current-product) default of 70% via
+    // replaceState() above. Force it to 0% instead so a pre-existing project
+    // reproduces its original sound exactly - see the schema-version doc
+    // comment in Parameters.h and Tests/BaselineRegressionTests.cpp.
+    if (loadedSchemaVersion < dnaorbit::params::stereoPreserveIntroducedInSchema)
+    {
+        if (auto* stereoPreserve = apvts.getParameter (dnaorbit::params::stereoPreserveID))
+            stereoPreserve->setValueNotifyingHost (stereoPreserve->convertTo0to1 (dnaorbit::params::stereoPreserveLegacyPercent));
+    }
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

@@ -68,6 +68,10 @@ namespace
         p.mix01 = 1.0f;
         p.outputDb = 0.0f;
         p.autoGain = true;
+        // Explicit, not relying on the struct default: this is what makes
+        // these scenarios a schema-1/legacy fingerprint (see the class
+        // comment and Source/Parameters.h's stereoPreserveIntroducedInSchema).
+        p.stereoPreserve01 = 0.0f;
         engine.primeParameters (p);
         engine.setParameters (p);
 
