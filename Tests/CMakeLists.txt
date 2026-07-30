@@ -9,6 +9,7 @@ add_executable(DNAOrbitTests
     StateTests.cpp
     LevelMatchTests.cpp
     GeometryTests.cpp
+    BaselineRegressionTests.cpp
 )
 
 target_include_directories(DNAOrbitTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)

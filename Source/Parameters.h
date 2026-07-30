@@ -22,6 +22,22 @@ namespace dnaorbit::params
     inline constexpr const char* outputID   = "output";
     inline constexpr const char* autoGainID = "autoGain";
 
+    /**
+     * State schema version, stored as a property on apvts.state (alongside
+     * editorPage/Width/Height) rather than as a parameter, since it is not an
+     * audio-controllable value.
+     *
+     *   1 - baseline: the 12 parameters above, Wet built from a mono (M-only)
+     *       downmix, no stereo-preserving source model.
+     *
+     * Bump this whenever a new schema version changes how a *missing* schema
+     * property (i.e. a project saved by an older build) should be
+     * interpreted - not for ordinary new parameters, which APVTS already
+     * defaults safely on its own. See PluginProcessor::setStateInformation.
+     */
+    inline constexpr const char* schemaVersionPropertyID = "dnaOrbitSchemaVersion";
+    inline constexpr int currentStateSchemaVersion = 1;
+
     inline constexpr float rateMinHz = 0.02f;
     inline constexpr float rateMaxHz = 4.0f;
     inline constexpr float rateDefaultHz = 0.12f;

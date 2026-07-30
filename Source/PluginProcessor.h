@@ -43,6 +43,16 @@ public:
 
     dnaorbit::dsp::HelixEngine& getEngine() noexcept { return engine; }
 
+    /**
+     * Schema version the currently-loaded state was saved under (see
+     * Parameters::currentStateSchemaVersion). A fresh instance with nothing
+     * loaded reports the current version, i.e. "nothing to migrate". Future
+     * parameters that need a different default for state saved before they
+     * existed (e.g. Stereo Preserve in a later phase) should compare against
+     * this rather than re-deriving version logic themselves.
+     */
+    int getLoadedSchemaVersion() const noexcept { return loadedSchemaVersion; }
+
 private:
     dnaorbit::dsp::HelixEngine engine;
 
@@ -58,6 +68,8 @@ private:
     std::atomic<float>* mixParam        = nullptr;
     std::atomic<float>* outputParam     = nullptr;
     std::atomic<float>* autoGainParam   = nullptr;
+
+    int loadedSchemaVersion = dnaorbit::params::currentStateSchemaVersion;
 
     float resolveRateHz() const noexcept;
     dnaorbit::dsp::HelixEngine::Parameters currentParameterSnapshot() const noexcept;

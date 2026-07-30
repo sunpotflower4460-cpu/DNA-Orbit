@@ -131,6 +131,8 @@ juce::AudioProcessorEditor* DNAOrbitAudioProcessor::createEditor()
 void DNAOrbitAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto state = apvts.copyState();
+    state.setProperty (dnaorbit::params::schemaVersionPropertyID,
+                        dnaorbit::params::currentStateSchemaVersion, nullptr);
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
     copyXmlToBinary (*xml, destData);
 }
@@ -144,6 +146,14 @@ void DNAOrbitAudioProcessor::setStateInformation (const void* data, int sizeInBy
 
     if (! xmlState->hasTagName (apvts.state.getType()))
         return;
+
+    // A project saved before this property existed has no schemaVersion at
+    // all - that is, by definition, schema 1 (today's format), so missing
+    // defaults to 1 rather than 0. Read before replaceState: the source XML
+    // is the ground truth for what was actually saved, not any value already
+    // sitting on the live apvts.state.
+    loadedSchemaVersion = xmlState->getIntAttribute (dnaorbit::params::schemaVersionPropertyID,
+                                                      dnaorbit::params::currentStateSchemaVersion);
 
     apvts.replaceState (juce::ValueTree::fromXml (*xmlState));
 }

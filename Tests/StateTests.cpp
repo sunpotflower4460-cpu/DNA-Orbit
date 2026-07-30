@@ -253,6 +253,54 @@ namespace
 
                 processor.releaseResources();
             }
+
+            beginTest ("A fresh instance with nothing loaded reports the current schema version");
+            {
+                DNAOrbitAudioProcessor processor;
+                expect (processor.getLoadedSchemaVersion() == dnaorbit::params::currentStateSchemaVersion,
+                        "A never-loaded instance has nothing to migrate, so it should report the current version");
+            }
+
+            beginTest ("Saving writes the current schema version; loading it back reports the same version");
+            {
+                DNAOrbitAudioProcessor processorA;
+                juce::MemoryBlock savedState;
+                processorA.getStateInformation (savedState);
+
+                DNAOrbitAudioProcessor processorB;
+                processorB.setStateInformation (savedState.getData(), (int) savedState.getSize());
+
+                expect (processorB.getLoadedSchemaVersion() == dnaorbit::params::currentStateSchemaVersion,
+                        "Loading a just-saved state must report the version that was actually saved");
+            }
+
+            beginTest ("A state saved before schema versioning existed is treated as schema 1, not crashing or defaulting to 0");
+            {
+                // Simulates every real project saved by a build before this
+                // property existed: its XML has no dnaOrbitSchemaVersion
+                // attribute at all.
+                DNAOrbitAudioProcessor processorA;
+                juce::MemoryBlock savedState;
+                processorA.getStateInformation (savedState);
+
+                std::unique_ptr<juce::XmlElement> xml (juce::AudioProcessor::getXmlFromBinary (
+                    savedState.getData(), (int) savedState.getSize()));
+                expect (xml != nullptr);
+
+                if (xml != nullptr)
+                {
+                    xml->removeAttribute (dnaorbit::params::schemaVersionPropertyID);
+
+                    juce::MemoryBlock unversionedState;
+                    juce::AudioProcessor::copyXmlToBinary (*xml, unversionedState);
+
+                    DNAOrbitAudioProcessor processorB;
+                    processorB.setStateInformation (unversionedState.getData(), (int) unversionedState.getSize());
+
+                    expect (processorB.getLoadedSchemaVersion() == 1,
+                            "A state with no version attribute predates versioning, which is schema 1 by definition");
+                }
+            }
         }
     };
 

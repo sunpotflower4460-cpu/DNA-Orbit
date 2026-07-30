@@ -8,6 +8,23 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(DNA_ORBIT_BUILD_TESTS "Build the DNA Orbit unit test suite" ON)
 
+# Local sanitizer builds (no CI service is used for this project - see
+# docs/commercial-upgrade/ - so this is the only automated way to run
+# ASan/UBSan). Usage:
+#   cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug -DDNA_ORBIT_SANITIZERS="address,undefined"
+#   cmake --build build-asan -j && ctest --test-dir build-asan --output-on-failure
+set(DNA_ORBIT_SANITIZERS "" CACHE STRING
+    "Comma-separated sanitizers to build with, e.g. 'address,undefined' (GCC/Clang only)")
+
+if (NOT DNA_ORBIT_SANITIZERS STREQUAL "")
+    if (MSVC)
+        message(WARNING "DNA_ORBIT_SANITIZERS is not supported with MSVC; ignoring.")
+    else()
+        add_compile_options(-fsanitize=${DNA_ORBIT_SANITIZERS} -fno-omit-frame-pointer -g)
+        add_link_options(-fsanitize=${DNA_ORBIT_SANITIZERS})
+    endif()
+endif()
+
 # The UI text is Japanese, so the sources are UTF-8. GCC/Clang assume UTF-8
 # already; MSVC needs to be told explicitly for both the source and execution
 # character sets, otherwise the literals are mangled.
