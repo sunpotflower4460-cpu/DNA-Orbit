@@ -54,6 +54,21 @@ namespace dnaorbit::dsp
 
         struct VisualState
         {
+            /**
+             * Unwrapped total orbit phase of strand A, wrapped only at a large
+             * multiple of 2*pi. The UI reconstructs its history from this: a wrapped
+             * angle would be ambiguous to unwrap after a message-thread stall (at
+             * 4 Hz a 125 ms stall already exceeds pi), which would make the helix
+             * jump or briefly run backwards.
+             */
+            double phaseA = 0.0;
+            /**
+             * Relative phase thetaB - thetaA, wrapped to [0, 2*pi). Publishing the
+             * relative phase rather than thetaB keeps the antipodal invariant exact:
+             * phi == pi means the strand midpoint is zero, whatever else drifts.
+             */
+            float phi = 0.0f;
+
             float thetaA = 0.0f;
             float thetaB = 0.0f;
             float radius01 = 0.0f;
@@ -77,6 +92,14 @@ namespace dnaorbit::dsp
         // Orbit state (double precision to avoid long-run drift).
         double thetaA = 0.0;
         double thetaB = orbitmath::pi;
+
+        /**
+         * Unwrapped phase accumulator for the UI, wrapped at a large multiple of
+         * 2*pi so it never loses precision (double epsilon at this magnitude is
+         * ~4e-12 rad) and so the UI can unwrap it unambiguously.
+         */
+        double phaseAccumA = 0.0;
+        static constexpr double phaseModulus = orbitmath::twoPi * 4096.0;
         bool   symmetryLocked = true;
 
         // Fixed-duration linear resync ramp used when Symmetry returns to 100%
@@ -127,6 +150,8 @@ namespace dnaorbit::dsp
         std::atomic<bool>  uiNullCoreOn { false };
         std::atomic<float> uiOutputRms { 0.0f };
         std::atomic<float> uiCorrelation { 1.0f };
+        std::atomic<double> uiPhaseA { 0.0 };
+        std::atomic<float> uiPhi { (float) orbitmath::pi };
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HelixEngine)
     };

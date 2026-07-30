@@ -17,6 +17,52 @@ namespace dnaorbit::ui
         setColour (juce::ComboBox::textColourId, textColour());
     }
 
+    juce::String DnaLookAndFeel::japaneseTypefaceName()
+    {
+       #if JUCE_MAC || JUCE_IOS
+        return "Hiragino Sans";
+       #elif JUCE_WINDOWS
+        return "Yu Gothic UI";
+       #else
+        return "Noto Sans CJK JP";
+       #endif
+    }
+
+    juce::Font DnaLookAndFeel::uiFont (float height, bool bold)
+    {
+        auto options = juce::FontOptions().withName (japaneseTypefaceName()).withHeight (height);
+
+        if (bold)
+            options = options.withStyle ("Bold");
+
+        return juce::Font (options);
+    }
+
+    juce::Font DnaLookAndFeel::getLabelFont (juce::Label& label)
+    {
+        return uiFont (label.getFont().getHeight(), label.getFont().isBold());
+    }
+
+    juce::Font DnaLookAndFeel::getTextButtonFont (juce::TextButton&, int buttonHeight)
+    {
+        return uiFont (juce::jmin (15.0f, (float) buttonHeight * 0.6f));
+    }
+
+    juce::Font DnaLookAndFeel::getComboBoxFont (juce::ComboBox& box)
+    {
+        return uiFont (juce::jmin (14.0f, (float) box.getHeight() * 0.65f));
+    }
+
+    juce::Font DnaLookAndFeel::getPopupMenuFont()
+    {
+        return uiFont (14.0f);
+    }
+
+    juce::Font DnaLookAndFeel::getSliderPopupFont (juce::Slider&)
+    {
+        return uiFont (13.0f);
+    }
+
     void DnaLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int width, int height,
                                            float sliderPosProportional, float rotaryStartAngle, float rotaryEndAngle,
                                            juce::Slider& slider)

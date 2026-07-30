@@ -2,11 +2,11 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "PluginProcessor.h"
-#include "ui/OrbitDisplay.h"
+#include "ui/HelixView3D.h"
 #include "ui/DnaLookAndFeel.h"
 
 class DNAOrbitAudioProcessorEditor : public juce::AudioProcessorEditor,
-                                     private juce::Button::Listener
+                                     private juce::Timer
 {
 public:
     explicit DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcessor&);
@@ -16,38 +16,66 @@ public:
     void resized() override;
 
 private:
-    using SliderAttachment  = juce::AudioProcessorValueTreeState::SliderAttachment;
-    using ButtonAttachment  = juce::AudioProcessorValueTreeState::ButtonAttachment;
-    using ComboAttachment   = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
+    using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
+    using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
+    using ComboAttachment  = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
+    /** A rotary control with a Japanese name and a one-line explanation beneath it. */
     struct Knob
     {
         juce::Slider slider { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow };
-        juce::Label label;
+        juce::Label nameLabel;
+        juce::Label hintLabel;
         std::unique_ptr<SliderAttachment> attachment;
     };
+
+    void setUpKnob (Knob&, const juce::String& paramID, const juce::String& name,
+                    const juce::String& hint, const juce::String& tooltip);
+    void layOutKnobRow (juce::Rectangle<int> row, const std::vector<Knob*>& knobs);
+    void showPage (int page);
+    void applyPreset (int presetIndex);
+    void timerCallback() override;
+
+    /** Prefers a real Japanese font: fontconfig's default for ja can be a Chinese face. */
+    static juce::Font japaneseFont (float height, bool bold = false);
 
     DNAOrbitAudioProcessor& processorRef;
 
     dnaorbit::ui::DnaLookAndFeel lookAndFeel;
-    dnaorbit::ui::OrbitDisplay orbitDisplay;
+    dnaorbit::ui::HelixView3D helixView;
+    juce::TooltipWindow tooltipWindow { this, 600 };
 
-    Knob rateKnob, radiusKnob, depthKnob, symmetryKnob, twistKnob, coreKnob, mixKnob, outputKnob;
+    juce::Label titleLabel, subtitleLabel;
 
-    juce::ToggleButton syncButton { "Sync" };
+    // Button text is set in the constructor via jp(), since juce::String's
+    // const char* constructor would mangle these UTF-8 literals.
+    juce::TextButton basicTabButton, detailTabButton;
+    int currentPage = 0;
+
+    juce::ComboBox presetBox;
+    juce::Label presetLabel;
+
+    // Basic page.
+    Knob rateKnob, radiusKnob, depthKnob, mixKnob;
+
+    // Detail page.
+    Knob symmetryKnob, twistKnob, coreKnob, outputKnob;
+    juce::ToggleButton syncButton;
     juce::ComboBox divisionBox;
     juce::Label divisionLabel;
-    std::unique_ptr<ButtonAttachment> syncAttachment;
+    juce::ToggleButton autoGainButton;
+    juce::ToggleButton nullCoreButton;
+
+    std::unique_ptr<ButtonAttachment> syncAttachment, autoGainAttachment, nullCoreAttachment;
     std::unique_ptr<ComboAttachment> divisionAttachment;
 
-    juce::ToggleButton nullCoreButton { "Null Core" };
-    std::unique_ptr<ButtonAttachment> nullCoreAttachment;
-    juce::Label nullCoreWarningLabel;
+    // Live readouts, updated on a slow timer so 45 fps helix repaints never
+    // trigger glyph re-layout.
+    juce::Label readoutLabel, statusLabel, warningLabel;
 
-    juce::Label titleLabel;
-
-    void setUpKnob (Knob& knob, const juce::String& paramID, const juce::String& text);
-    void buttonClicked (juce::Button*) override;
+    // Tracks the nullCore parameter itself, so the warning follows host
+    // automation and preset loads rather than only UI clicks.
+    std::unique_ptr<juce::ParameterAttachment> nullCoreWatcher;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DNAOrbitAudioProcessorEditor)
 };

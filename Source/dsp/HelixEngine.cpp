@@ -42,6 +42,7 @@ namespace dnaorbit::dsp
     {
         thetaA = 0.0;
         thetaB = orbitmath::pi;
+        phaseAccumA = 0.0;
         symmetryLocked = true;
         resyncStartError = 0.0;
         resyncSamplesRemaining = 0;
@@ -69,6 +70,8 @@ namespace dnaorbit::dsp
         uiCentroidDistance.store (0.0f, std::memory_order_relaxed);
         uiOutputRms.store (0.0f, std::memory_order_relaxed);
         uiCorrelation.store (1.0f, std::memory_order_relaxed);
+        uiPhaseA.store (0.0, std::memory_order_relaxed);
+        uiPhi.store ((float) orbitmath::pi, std::memory_order_relaxed);
     }
 
     void HelixEngine::setParameters (const Parameters& p) noexcept
@@ -124,6 +127,7 @@ namespace dnaorbit::dsp
             // --- Orbit angle update -------------------------------------------------
             const double incA = orbitmath::angularIncrement ((double) rateHz, sampleRate);
             thetaA = orbitmath::wrapTwoPi (thetaA + incA);
+            phaseAccumA = std::fmod (phaseAccumA + incA, phaseModulus);
 
             const bool wantsLocked = symmetry >= (float) symmetryLockThreshold;
 
@@ -300,6 +304,8 @@ namespace dnaorbit::dsp
                 uiCentroidZ.store ((float) centroid.z, std::memory_order_relaxed);
                 uiCentroidDistance.store ((float) centroid.distance, std::memory_order_relaxed);
                 uiSymmetry.store (symmetry, std::memory_order_relaxed);
+                uiPhaseA.store (phaseAccumA, std::memory_order_relaxed);
+                uiPhi.store ((float) orbitmath::wrapTwoPi (thetaB - thetaA), std::memory_order_relaxed);
             }
         }
 
@@ -335,6 +341,8 @@ namespace dnaorbit::dsp
         state.symmetry01 = uiSymmetry.load (std::memory_order_relaxed);
         state.outputRms = uiOutputRms.load (std::memory_order_relaxed);
         state.correlation = uiCorrelation.load (std::memory_order_relaxed);
+        state.phaseA = uiPhaseA.load (std::memory_order_relaxed);
+        state.phi = uiPhi.load (std::memory_order_relaxed);
         return state;
     }
 }

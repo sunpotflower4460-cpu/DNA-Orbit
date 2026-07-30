@@ -65,8 +65,11 @@ target_sources(DNAOrbit PRIVATE
     Source/dsp/OrbitMath.h
     Source/dsp/OnePoleLowPass.h
     Source/dsp/StereoUtilities.h
-    Source/ui/OrbitDisplay.cpp
-    Source/ui/OrbitDisplay.h
+    Source/ui/HelixView3D.cpp
+    Source/ui/HelixView3D.h
+    Source/ui/HelixHistory.h
+    Source/ui/Projection3D.h
+    Source/ui/SphereSprite.h
     Source/ui/DnaLookAndFeel.cpp
     Source/ui/DnaLookAndFeel.h
 )
@@ -91,4 +94,24 @@ target_link_libraries(DNAOrbit PUBLIC
 if (DNA_ORBIT_BUILD_TESTS)
     enable_testing()
     add_subdirectory(Tests)
+endif()
+
+# Developer tool: renders editor screenshots headlessly by driving the processor
+# directly. Needed because a machine with no audio device never calls
+# processBlock, which leaves the visualiser frozen in the Standalone build.
+option(DNA_ORBIT_BUILD_TOOLS "Build the DNA Orbit screenshot tool" OFF)
+
+if (DNA_ORBIT_BUILD_TOOLS)
+    # Plain executable reusing the plugin's shared code, exactly like the test
+    # target: juce_add_console_app would force JUCE_STANDALONE_APPLICATION=1 and
+    # clash with the plugin's own definition.
+    add_executable(DNAOrbitRenderShots Tools/RenderShots.cpp)
+    target_include_directories(DNAOrbitRenderShots PRIVATE Source)
+    target_compile_definitions(DNAOrbitRenderShots PRIVATE JUCE_MODAL_LOOPS_PERMITTED=1)
+    target_link_libraries(DNAOrbitRenderShots PRIVATE
+        DNAOrbit
+        juce::juce_audio_processors
+        juce::juce_gui_basics
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
 endif()

@@ -73,8 +73,9 @@ namespace dnaorbit::params
                     if (hz <= 0.0f)
                         return juce::String ("-");
                     const float secondsPerTurn = 1.0f / hz;
-                    // JUCE interprets const char* literals as UTF-8.
-                    return juce::String (secondsPerTurn, secondsPerTurn < 10.0f ? 2 : 1) + "秒/周";
+                    // juce::String(const char*) parses as ASCII, so wrap UTF-8 explicitly.
+                    return juce::String (secondsPerTurn, secondsPerTurn < 10.0f ? 2 : 1)
+                         + juce::String (juce::CharPointer_UTF8 ("秒/周"));
                 })
                 .withValueFromStringFunction ([] (const juce::String& text)
                 {
