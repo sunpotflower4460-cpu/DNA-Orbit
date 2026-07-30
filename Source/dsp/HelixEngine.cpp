@@ -8,6 +8,7 @@ namespace dnaorbit::dsp
 
         const double smoothParamSeconds = 0.05;   // 50 ms for standard parameters
         const double nullCoreSeconds    = 0.12;   // 120 ms mode-switch crossfade
+        const double softBypassSeconds  = 0.03;   // 30 ms Soft Bypass crossfade (ADR-008)
 
         radiusSmoothed.reset (sampleRate, smoothParamSeconds);
         depthSmoothed.reset (sampleRate, smoothParamSeconds);
@@ -20,6 +21,7 @@ namespace dnaorbit::dsp
         rateHzSmoothed.reset (sampleRate, smoothParamSeconds);
         autoGainAmountSmoothed.reset (sampleRate, nullCoreSeconds);
         stereoPreserveSmoothed.reset (sampleRate, smoothParamSeconds);
+        softBypassSmoothed.reset (sampleRate, softBypassSeconds);
 
         lowPassA.prepare (sampleRate);
         lowPassB.prepare (sampleRate);
@@ -78,6 +80,7 @@ namespace dnaorbit::dsp
         rateHzSmoothed.setCurrentAndTargetValue (rateHzSmoothed.getCurrentValue());
         autoGainAmountSmoothed.setCurrentAndTargetValue (autoGainAmountSmoothed.getCurrentValue());
         stereoPreserveSmoothed.setCurrentAndTargetValue (stereoPreserveSmoothed.getCurrentValue());
+        softBypassSmoothed.setCurrentAndTargetValue (softBypassSmoothed.getCurrentValue());
 
         uiThetaA.store (0.0f, std::memory_order_relaxed);
         uiThetaB.store ((float) orbitmath::pi, std::memory_order_relaxed);
@@ -181,6 +184,7 @@ namespace dnaorbit::dsp
         const float autoGainAmount = p.autoGain ? 1.0f : 0.0f;
         const float nullCoreAmount = p.nullCore ? 1.0f : 0.0f;
         const float outputGain = dbToGain (outputDb);
+        const float softBypassAmount = p.softBypass ? 1.0f : 0.0f;
 
         if (snapImmediately)
         {
@@ -200,6 +204,7 @@ namespace dnaorbit::dsp
             outputGainSmoothed.setCurrentAndTargetValue (outputGain);
             nullCoreMixSmoothed.setCurrentAndTargetValue (nullCoreAmount);
             stereoPreserveSmoothed.setCurrentAndTargetValue (stereoPreserve01);
+            softBypassSmoothed.setCurrentAndTargetValue (softBypassAmount);
         }
         else
         {
@@ -214,6 +219,7 @@ namespace dnaorbit::dsp
             outputGainSmoothed.setTargetValue (outputGain);
             nullCoreMixSmoothed.setTargetValue (nullCoreAmount);
             stereoPreserveSmoothed.setTargetValue (stereoPreserve01);
+            softBypassSmoothed.setTargetValue (softBypassAmount);
         }
 
         uiNullCoreOn.store (p.nullCore, std::memory_order_relaxed);
@@ -297,6 +303,7 @@ namespace dnaorbit::dsp
             const float rateHz   = rateHzSmoothed.getNextValue();
             const float autoGainAmount = autoGainAmountSmoothed.getNextValue();
             const float stereoPreserve = stereoPreserveSmoothed.getNextValue();
+            const float softBypassAmt = softBypassSmoothed.getNextValue();
 
             // Sanitized at the single point audio enters the engine: the two
             // one-pole filters below are recursive (state depends on the
@@ -591,6 +598,20 @@ namespace dnaorbit::dsp
 
             finalL *= outGain;
             finalR *= outGain;
+
+            // --- Soft Bypass: crossfade the finished signal to dry ------------
+            // Deliberately the very last step, after output trim, so the
+            // fully-bypassed output is exactly the sanitized input (dryL/
+            // dryR), independent of Output/Mix/anything else - the same
+            // "Bypass means input==output" contract as the host's own
+            // Bypass (ADR-001), but reachable from inside the plugin and
+            // ramped (softBypassSmoothed, ~30ms) instead of instant. Nothing
+            // upstream of this point ever branches on softBypassAmt, so the
+            // orbit phase, filters, and smoothers keep running normally
+            // underneath a Soft Bypass exactly like ADR-001's host-Bypass
+            // scratch path - see ADR-008.
+            finalL += (dryL - finalL) * softBypassAmt;
+            finalR += (dryR - finalR) * softBypassAmt;
 
             constexpr float antiDenormal = 1.0e-20f;
             finalL += antiDenormal; finalL -= antiDenormal;

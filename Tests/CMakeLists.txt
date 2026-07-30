@@ -16,6 +16,7 @@ add_executable(DNAOrbitTests
     BassAnchorTests.cpp
     CharacterTests.cpp
     HostPhaseLockTests.cpp
+    SoftBypassTests.cpp
 )
 
 target_include_directories(DNAOrbitTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)

@@ -42,14 +42,18 @@ namespace dnaorbit::presets
         int   phaseMode;
         float startPhaseDeg;
         bool  clockwise;
+        // Every factory preset applies with Soft Bypass off. Picking a
+        // preset is meant to audition its sound, never to silently leave
+        // you bypassed.
+        bool  softBypass;
     };
 
     inline const Preset presets[] = {
-        { "ボーカルを広げる", 0.10f, false, 2,  75.0f, 45.0f, 100.0f, 4.0f, 10.0f, false, 30.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true },
-        { "パッドを回す",     0.18f, false, 2, 100.0f, 65.0f, 100.0f, 7.0f, 10.0f, false, 45.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true },
-        { "ギターに揺らぎ",   0.08f, false, 2,  80.0f, 60.0f,  88.0f, 6.0f, 15.0f, false, 40.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true },
-        { "シンセを速く回す", 0.60f, false, 2,  90.0f, 70.0f, 100.0f, 8.0f,  0.0f, false, 40.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true },
-        { "実験:中心を消す", 0.04f, false, 2, 100.0f, 50.0f, 100.0f, 8.0f,  0.0f, true,  30.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true },
+        { "ボーカルを広げる", 0.10f, false, 2,  75.0f, 45.0f, 100.0f, 4.0f, 10.0f, false, 30.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true, false },
+        { "パッドを回す",     0.18f, false, 2, 100.0f, 65.0f, 100.0f, 7.0f, 10.0f, false, 45.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true, false },
+        { "ギターに揺らぎ",   0.08f, false, 2,  80.0f, 60.0f,  88.0f, 6.0f, 15.0f, false, 40.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true, false },
+        { "シンセを速く回す", 0.60f, false, 2,  90.0f, 70.0f, 100.0f, 8.0f,  0.0f, false, 40.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true, false },
+        { "実験:中心を消す", 0.04f, false, 2, 100.0f, 50.0f, 100.0f, 8.0f,  0.0f, true,  30.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true, false },
     };
 
     inline constexpr int numPresets = (int) (sizeof (presets) / sizeof (presets[0]));
@@ -84,6 +88,7 @@ namespace dnaorbit::presets
         set (params::phaseModeID, (float) preset.phaseMode);
         set (params::startPhaseID, preset.startPhaseDeg);
         set (params::directionID, preset.clockwise ? 0.0f : 1.0f);
+        set (params::softBypassID, preset.softBypass ? 1.0f : 0.0f);
     }
 
     /**
@@ -122,6 +127,7 @@ namespace dnaorbit::presets
             && isClose (params::characterID, (float) preset.character, 0.5f)
             && isClose (params::phaseModeID, (float) preset.phaseMode, 0.5f)
             && isClose (params::startPhaseID, preset.startPhaseDeg, 1.0f)
-            && isOn (params::directionID, ! preset.clockwise); // choice index 1 (CCW) == "on"
+            && isOn (params::directionID, ! preset.clockwise) // choice index 1 (CCW) == "on"
+            && isOn (params::softBypassID, preset.softBypass);
     }
 }

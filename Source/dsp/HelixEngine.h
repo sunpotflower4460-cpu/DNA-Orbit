@@ -126,6 +126,16 @@ namespace dnaorbit::dsp
 
             /** Host transport play state, for Retrigger and Host Lock. */
             bool hostIsPlaying = false;
+
+            /**
+             * In-plugin Soft Bypass, independent of the host's own Bypass.
+             * false (default) is this engine's normal processing - no
+             * schema bump needed. When true, process() still runs the full
+             * effect chain every block (nothing freezes) and crossfades the
+             * final output to the dry input over ~30ms; see
+             * softBypassSmoothed and ADR-008.
+             */
+            bool softBypass = false;
         };
 
         void prepare (double newSampleRate, int maximumBlockSize, int maxChannelsHint);
@@ -234,6 +244,8 @@ namespace dnaorbit::dsp
         juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> rateHzSmoothed;
         juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> autoGainAmountSmoothed;
         juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> stereoPreserveSmoothed;
+        /** 0 = normal processing, 1 = fully crossfaded to dry. ~30ms ramp. */
+        juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> softBypassSmoothed;
 
         bool  nullCoreTarget = false;
 

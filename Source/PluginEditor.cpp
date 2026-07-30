@@ -77,6 +77,15 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
     addAndMakeVisible (revertButton);
     revertButton.setVisible (false);
 
+    // --- Soft Bypass (top bar, both tabs) ---------------------------------------
+    bypassButton.setButtonText (jp("バイパス"));
+    bypassButton.setColour (juce::ToggleButton::tickColourId, dnaorbit::ui::DnaLookAndFeel::warningColour());
+    bypassButton.setTooltip (jp("プラグイン内蔵のバイパスです(ホスト側のBypassとは別)。")
+                             + jp("約30msでドライ音へなめらかに切り替わり、クリックが出ません。")
+                             + jp("軌道の位相は裏側で回り続けるので、解除しても不自然な段差は出ません。"));
+    addAndMakeVisible (bypassButton);
+    bypassAttachment = std::make_unique<ButtonAttachment> (processorRef.apvts, params::softBypassID, bypassButton);
+
     // --- Basic page knobs -------------------------------------------------------
     setUpKnob (rateKnob, params::rateID, jp("速さ"), jp("1周する時間"),
                jp("音像が中心軸を1周するのにかかる時間です。ゆっくりだと自然、速いと目立ちます。"));
@@ -383,6 +392,11 @@ void DNAOrbitAudioProcessorEditor::resized()
     presetLabel.setBounds (presetArea.removeFromLeft (74));
     presetArea.removeFromLeft (6);
     presetBox.setBounds (presetArea);
+
+    // Whatever remains of topBar (between the tabs and the preset menu) is
+    // the Soft Bypass toggle - visible on both pages since it is a
+    // top-level, always-relevant control.
+    bypassButton.setBounds (topBar.reduced (4, 9));
 
     // --- Control area ----------------------------------------------------------
     auto controlArea = area.removeFromBottom (152).reduced (8);

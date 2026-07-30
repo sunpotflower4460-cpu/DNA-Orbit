@@ -162,14 +162,30 @@ silencing Wet, Mix-sweep RMS deviation bounds) for actually listening.
      default versus Host Lock's continuous tracking is a UX judgement call,
      not something the numeric tests can answer.
 
-- **Bypass toggle audibility** (see `docs/commercial-upgrade/decisions/ADR-001-bypass-continuity.md`):
-  Phase 1 fixed the engine's internal state freezing during bypass (orbit
+- **Host Bypass toggle audibility** (see `docs/commercial-upgrade/decisions/ADR-001-bypass-continuity.md`):
+  Phase 1 fixed the *host's own* Bypass's internal state freezing (orbit
   phase, filters, and smoothers now keep advancing on a scratch buffer), but
-  deliberately did NOT add a Soft Bypass audio crossfade — that was a
-  documented, reasoned trade-off, not an oversight. If a real DAW listening
-  session finds an audible click/discontinuity when toggling Host Bypass,
-  that is the one thing to specifically check for; ADR-001 already lists the
-  crossfade as the fallback design if this turns out to be needed.
+  deliberately did NOT add an audio crossfade to it — that was a documented,
+  reasoned trade-off, not an oversight (Soft Bypass, added in Phase 5, is a
+  separate in-plugin control - see the next bullet - and does not change
+  this). If a real DAW listening session finds an audible click/
+  discontinuity when toggling the *host's* Bypass specifically, ADR-001
+  already lists a crossfade as the fallback design if this turns out to be
+  needed.
+
+- **Soft Bypass (in-plugin) real-DAW feel** (see
+  `docs/commercial-upgrade/decisions/ADR-008-soft-bypass.md`): the 30ms
+  crossfade's exact convergence and "no state freeze" property are verified
+  numerically in `Tests/SoftBypassTests.cpp`, but two things need real ears/
+  real DAW use:
+  1. Whether 30ms feels right (immediate enough for a "kill the effect now"
+     control, without being so fast it clicks on material with strong
+     transients right at the moment of engaging/disengaging).
+  2. Whether having two conceptually different Bypass controls — the host's
+     own Bypass (top of most DAW channel strips) and this plugin's own
+     バイパス toggle in the top bar — is clear to users rather than
+     confusing. If real usage shows confusion, the tooltip wording and/or
+     button placement is the first thing to revisit.
 
 ## Signing, notarization, installers
 

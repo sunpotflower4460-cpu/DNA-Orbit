@@ -27,6 +27,7 @@ namespace dnaorbit::params
     inline constexpr const char* phaseModeID      = "phaseMode";
     inline constexpr const char* startPhaseID     = "startPhase";
     inline constexpr const char* directionID      = "direction";
+    inline constexpr const char* softBypassID     = "softBypass";
 
     /**
      * State schema version, stored as a property on apvts.state (alongside
@@ -307,6 +308,17 @@ namespace dnaorbit::params
         paramList.push_back (std::make_unique<juce::AudioParameterChoice> (
             juce::ParameterID { directionID, 1 }, "Direction",
             juce::StringArray { "CW", "CCW" }, 0));
+
+        // In-plugin Soft Bypass, independent of the host's own Bypass. Off
+        // (the default) is exactly this engine's normal processing - no
+        // schema bump needed. When on, HelixEngine::process() still runs the
+        // full effect chain every block (so the orbit phase, filters, and
+        // smoothers never freeze - see ADR-008) and crossfades the final
+        // output to the dry input over ~30ms, avoiding both the freeze
+        // problem ADR-001 fixed for host Bypass and any dependency on how
+        // well a given host automates/announces its own Bypass.
+        paramList.push_back (std::make_unique<juce::AudioParameterBool> (
+            juce::ParameterID { softBypassID, 1 }, "Soft Bypass", false));
 
         return { paramList.begin(), paramList.end() };
     }

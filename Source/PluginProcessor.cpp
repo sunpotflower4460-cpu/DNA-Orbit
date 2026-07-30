@@ -55,6 +55,7 @@ DNAOrbitAudioProcessor::DNAOrbitAudioProcessor()
     phaseModeParam      = apvts.getRawParameterValue (dnaorbit::params::phaseModeID);
     startPhaseParam     = apvts.getRawParameterValue (dnaorbit::params::startPhaseID);
     directionParam      = apvts.getRawParameterValue (dnaorbit::params::directionID);
+    softBypassParam     = apvts.getRawParameterValue (dnaorbit::params::softBypassID);
 }
 
 void DNAOrbitAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
@@ -166,6 +167,9 @@ dnaorbit::dsp::HelixEngine::Parameters DNAOrbitAudioProcessor::currentParameterS
             p.hostCycleBeats = dnaorbit::params::divisionIndexToBeats (divisionIndex, quarterNotesPerBar);
         }
     }
+
+    p.softBypass = softBypassParam->load() > 0.5f;
+
     return p;
 }
 

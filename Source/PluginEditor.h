@@ -59,6 +59,11 @@ private:
     juce::Label presetLabel;
     juce::TextButton revertButton;
 
+    // Always visible (both tabs), in the top bar: an in-plugin Soft Bypass,
+    // independent of the host's own Bypass. See ADR-008.
+    juce::ToggleButton bypassButton;
+    std::unique_ptr<ButtonAttachment> bypassAttachment;
+
     // Tracks which factory preset (if any) is active, so the UI can show a
     // "Modified" state once the user nudges anything and offer Revert.
     // -1 means "no preset selected" (e.g. a project saved before this preset

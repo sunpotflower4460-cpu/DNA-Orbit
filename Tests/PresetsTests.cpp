@@ -37,6 +37,7 @@ namespace
                     processorB.apvts.getParameter (dnaorbit::params::phaseModeID)->setValueNotifyingHost (1.0f);
                     processorB.apvts.getParameter (dnaorbit::params::startPhaseID)->setValueNotifyingHost (0.7f);
                     processorB.apvts.getParameter (dnaorbit::params::directionID)->setValueNotifyingHost (1.0f);
+                    processorB.apvts.getParameter (dnaorbit::params::softBypassID)->setValueNotifyingHost (1.0f);
 
                     dnaorbit::presets::apply (processorA.apvts, preset);
                     dnaorbit::presets::apply (processorB.apvts, preset);
@@ -49,7 +50,8 @@ namespace
                                              dnaorbit::params::outputID, dnaorbit::params::autoGainID,
                                              dnaorbit::params::stereoPreserveID, dnaorbit::params::bassAnchorHzID,
                                              dnaorbit::params::characterID, dnaorbit::params::phaseModeID,
-                                             dnaorbit::params::startPhaseID, dnaorbit::params::directionID })
+                                             dnaorbit::params::startPhaseID, dnaorbit::params::directionID,
+                                             dnaorbit::params::softBypassID })
                     {
                         expectWithinAbsoluteError (processorA.apvts.getRawParameterValue (id)->load(),
                                                     processorB.apvts.getRawParameterValue (id)->load(), 1.0e-3f,

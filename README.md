@@ -67,8 +67,14 @@ Presets are named after what they do rather than what they are —
 ボーカルを広げる / パッドを回す / ギターに揺らぎ / シンセを速く回す /
 実験:中心を消す — so the plugin is usable before touching a knob.
 
+A **バイパス (Soft Bypass)** toggle sits in the top bar and stays visible on
+both tabs — an in-plugin Bypass independent of the host's own Bypass, so it
+is always reachable and automatable regardless of how (or whether) a given
+host exposes its own Bypass. See below.
+
 **詳細 (Detail)** — テンポ同期 + 分割, 対称性, ねじれ, 中心の芯, 出力,
-ステレオ保持, 音量自動補正, and NULL CORE (marked in red). Every control has a
+ステレオ保持, 低音アンカー, 音量自動補正, NULL CORE (marked in red), 音色
+(Character), and 位相/方向 (Phase Mode/Direction). Every control has a
 Japanese tooltip.
 
 ### The 3D visualiser
@@ -121,6 +127,7 @@ exceeds budget.
 | Phase Mode | `phaseMode` | Free / Retrigger / Host Lock | **Free** | Free: unchanged continuous phase (no PPQ dependency). Retrigger: snaps to Start Phase the instant host playback starts. Host Lock: phase is continuously derived from the host's PPQ position. See below |
 | Start Phase | `startPhase` | 0 – 360° | 0° | The angle Retrigger snaps to, and the phase offset Host Lock's PPQ mapping is measured from. No dedicated knob yet (Detail tab) — automatable via the host's generic parameter list |
 | Direction | `direction` | CW / CCW | **CW** | Rotation direction; also which way Host Lock's PPQ-derived phase advances |
+| Soft Bypass | `softBypass` | on/off | **off** | In-plugin Bypass, independent of the host's own Bypass. Crossfades the final output to Dry over ~30ms; the orbit/filters/smoothers keep running underneath it. See below |
 
 When host tempo is unavailable while Sync is on, the plugin falls back
 safely to the free-running Rate knob rather than guessing a tempo.
@@ -240,15 +247,48 @@ Like Character and Bass Anchor's own default, Free/0°/CW is bit-identical
 to this engine's pre-existing behaviour, so **no state-schema bump was
 needed** for any of these three new parameters.
 
+### Soft Bypass
+
+`softBypass` is an in-plugin Bypass, independent of the host's own Bypass
+(the top bar's バイパス toggle, visible on both tabs). It exists because
+Bypass automation quality/visibility varies a lot between hosts — this
+control is always reachable, always automatable, and behaves identically
+regardless of host.
+
+Unlike the host Bypass fix in ADR-001 (which runs the engine against a
+scratch buffer to keep its internal state from freezing), Soft Bypass needs
+no separate code path at all: nothing upstream of the very last step in
+`HelixEngine::process()` ever branches on it, so Bass Anchor, Stereo
+Preserve, the orbit's angle, and every filter/smoother keep running
+completely normally underneath it. The only change is a crossfade of the
+*finished* output toward the sanitized dry input, over a 30ms linear ramp:
+
+```
+finalL += (dryL - finalL) * softBypassAmount
+finalR += (dryR - finalR) * softBypassAmount
+```
+
+Because this happens after Mix, Output trim, and Core, a fully-engaged Soft
+Bypass (`softBypassAmount == 1`) reproduces the input exactly, regardless of
+what Mix/Output/NULL CORE are set to — the same "Bypass means input==output"
+contract as the host's own Bypass, just reachable from inside the plugin and
+ramped instead of instant. See
+`docs/commercial-upgrade/decisions/ADR-008-soft-bypass.md` for the full
+design and why 30ms was chosen (a little faster than NULL CORE's 120ms
+mode-switch crossfade, since Bypass is meant to feel immediate).
+
+**Compatibility**: off (the default) is exactly this engine's normal
+processing — no state-schema bump was needed.
+
 ### Presets
 
 Selectable from the プリセット menu in the 基本 tab. Defined in
 `Source/Presets.h` (GUI-independent, unit-tested) as a point in the full
-18-parameter space — Sync, Division, Output, Auto Gain, Stereo Preserve,
-Bass Anchor, Character and Host Phase Lock are set explicitly by every
-preset (Sync off, Division 1 bar, Output 0 dB, Auto Gain on, Stereo
-Preserve 70%, Bass Anchor 120 Hz, Character Natural, Phase Mode Free,
-unless noted below), so choosing a preset is
+19-parameter space — Sync, Division, Output, Auto Gain, Stereo Preserve,
+Bass Anchor, Character, Host Phase Lock and Soft Bypass are set explicitly
+by every preset (Sync off, Division 1 bar, Output 0 dB, Auto Gain on,
+Stereo Preserve 70%, Bass Anchor 120 Hz, Character Natural, Phase Mode
+Free, Soft Bypass off, unless noted below), so choosing a preset is
 deterministic: the result never depends on what was set before. The values
 are then saved with the project like any other setting.
 
@@ -397,7 +437,7 @@ built-in `UnitTest` framework:
   flat editor-state properties into their own `uiState` node, a fresh
   instance defaulting Stereo Preserve to 70%, and a schema-1 project loading
   with it forced to 0% instead.
-- **Presets** — every factory preset sets all 18 parameters the same way
+- **Presets** — every factory preset sets all 19 parameters the same way
   regardless of prior state (determinism), the Modified indicator matching
   right after applying a preset and going false once nudged, and Revert
   (re-apply) restoring the matched state.
@@ -454,6 +494,12 @@ built-in `UnitTest` framework:
   the existing tolerance) even across a large transport jump, and that
   identical PPQ/parameter sequences produce identical output
   (offline-bounce determinism).
+- **SoftBypass** — that off (default) is bit-identical to never having Soft
+  Bypass at all, that engaging it converges to exactly Dry within the 30ms
+  ramp regardless of Mix/Output/NULL CORE and that disengaging it restores
+  the processed signal (not stuck at Dry), that the orbit phase keeps
+  advancing while it is engaged, and that the crossfade itself produces no
+  audible sample-to-sample jump.
 
 ## 10. Where the build output lands
 

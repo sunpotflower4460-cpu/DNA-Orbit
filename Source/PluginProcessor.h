@@ -82,6 +82,7 @@ private:
     std::atomic<float>* phaseModeParam      = nullptr;
     std::atomic<float>* startPhaseParam     = nullptr;
     std::atomic<float>* directionParam      = nullptr;
+    std::atomic<float>* softBypassParam     = nullptr;
 
     int loadedSchemaVersion = dnaorbit::params::currentStateSchemaVersion;
 
