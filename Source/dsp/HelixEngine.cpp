@@ -6,8 +6,8 @@ namespace dnaorbit::dsp
     {
         sampleRate = newSampleRate > 0.0 ? newSampleRate : 44100.0;
 
-        const double smoothParamSeconds = 0.05;   // 50 ms for standard parameters
-        const double nullCoreSeconds    = 0.12;   // 120 ms mode-switch crossfade
+        const double smoothParamSeconds = 0.05;
+        const double nullCoreSeconds    = 0.12;
 
         radiusSmoothed.reset (sampleRate, smoothParamSeconds);
         depthSmoothed.reset (sampleRate, smoothParamSeconds);
@@ -20,11 +20,11 @@ namespace dnaorbit::dsp
         rateHzSmoothed.reset (sampleRate, smoothParamSeconds);
         autoGainAmountSmoothed.reset (sampleRate, nullCoreSeconds);
         stereoPreserveSmoothed.reset (sampleRate, smoothParamSeconds);
+        softBypassSmoothed.reset (sampleRate, softBypassSeconds);
 
         lowPassA.prepare (sampleRate);
         lowPassB.prepare (sampleRate);
 
-        // Enough headroom for max back-delay (8ms) + max twist (20ms) + margin.
         const auto maxDelaySamples = (int) std::ceil (0.06 * sampleRate) + 16;
         delayA.setMaximumDelayInSamples (maxDelaySamples);
         delayB.setMaximumDelayInSamples (maxDelaySamples);
@@ -65,6 +65,7 @@ namespace dnaorbit::dsp
         rateHzSmoothed.setCurrentAndTargetValue (rateHzSmoothed.getCurrentValue());
         autoGainAmountSmoothed.setCurrentAndTargetValue (autoGainAmountSmoothed.getCurrentValue());
         stereoPreserveSmoothed.setCurrentAndTargetValue (stereoPreserveSmoothed.getCurrentValue());
+        softBypassSmoothed.setCurrentAndTargetValue (softBypassSmoothed.getCurrentValue());
 
         uiThetaA.store (0.0f, std::memory_order_relaxed);
         uiThetaB.store ((float) orbitmath::pi, std::memory_order_relaxed);
@@ -79,14 +80,6 @@ namespace dnaorbit::dsp
 
     namespace
     {
-        /**
-         * Falls back to a safe default for any non-finite value. A host that
-         * ever automates a parameter to NaN/Inf (malformed automation data, a
-         * buggy upstream plugin corrupting shared state, etc.) would otherwise
-         * latch thetaA/thetaB - which depend only on rateHz, not audio - to
-         * NaN permanently, since nothing else in the engine would ever
-         * overwrite them back to a finite value.
-         */
         float sanitizeParam (float value, float fallback) noexcept
         {
             return std::isfinite (value) ? value : fallback;
@@ -119,15 +112,11 @@ namespace dnaorbit::dsp
 
         const float autoGainAmount = p.autoGain ? 1.0f : 0.0f;
         const float nullCoreAmount = p.nullCore ? 1.0f : 0.0f;
+        const float softBypassAmount = p.softBypass ? 1.0f : 0.0f;
         const float outputGain = dbToGain (outputDb);
 
         if (snapImmediately)
         {
-            // Called once right after prepare(): every SmoothedValue defaults to
-            // a current value of 0, so without this every parameter - including
-            // Output and Mix - would audibly ramp in from silence over the
-            // first 50-120ms after every prepareToPlay() (plugin load, sample
-            // rate change), regardless of what the host had them set to.
             rateHzSmoothed.setCurrentAndTargetValue (rateHz);
             autoGainAmountSmoothed.setCurrentAndTargetValue (autoGainAmount);
             radiusSmoothed.setCurrentAndTargetValue (radius01);
@@ -139,6 +128,7 @@ namespace dnaorbit::dsp
             outputGainSmoothed.setCurrentAndTargetValue (outputGain);
             nullCoreMixSmoothed.setCurrentAndTargetValue (nullCoreAmount);
             stereoPreserveSmoothed.setCurrentAndTargetValue (stereoPreserve01);
+            softBypassSmoothed.setCurrentAndTargetValue (softBypassAmount);
         }
         else
         {
@@ -153,6 +143,7 @@ namespace dnaorbit::dsp
             outputGainSmoothed.setTargetValue (outputGain);
             nullCoreMixSmoothed.setTargetValue (nullCoreAmount);
             stereoPreserveSmoothed.setTargetValue (stereoPreserve01);
+            softBypassSmoothed.setTargetValue (softBypassAmount);
         }
 
         uiNullCoreOn.store (p.nullCore, std::memory_order_relaxed);
@@ -160,11 +151,6 @@ namespace dnaorbit::dsp
 
     void HelixEngine::process (juce::AudioBuffer<float>& buffer, int numInputChannels) noexcept
     {
-        // A host that violates the prepare-before-process contract would
-        // otherwise hit the delay lines' zero-channel internal buffer - see the
-        // comment on process() in the header. Leaving the buffer untouched
-        // here behaves like a pass-through, which is a safe fallback for a
-        // situation that should never occur in the first place.
         if (! isPrepared)
             return;
 
@@ -175,7 +161,6 @@ namespace dnaorbit::dsp
         const float* inL = buffer.getReadPointer (0);
         const float* inR = stereoIn ? buffer.getReadPointer (1) : nullptr;
 
-        // Block accumulators for the UI meters (computed on the output).
         double sumLL = 0.0, sumRR = 0.0, sumLR = 0.0;
 
         for (int n = 0; n < numSamples; ++n)
@@ -191,36 +176,16 @@ namespace dnaorbit::dsp
             const float rateHz   = rateHzSmoothed.getNextValue();
             const float autoGainAmount = autoGainAmountSmoothed.getNextValue();
             const float stereoPreserve = stereoPreserveSmoothed.getNextValue();
+            const float softBypass = softBypassSmoothed.getNextValue();
 
-            // Sanitized at the single point audio enters the engine: the two
-            // one-pole filters below are recursive (state depends on the
-            // previous sample), so a single non-finite input sample - a bad
-            // upstream plugin, a glitching host - would otherwise latch their
-            // state to NaN forever, with nothing downstream ever able to clear
-            // it. Substituting silence here keeps every later stage finite by
-            // induction, since reset() guarantees the filter/delay state
-            // starts finite and every operation on finite, bounded values
-            // (sin/cos/exp/clamp) stays finite.
             const float sampleInL = std::isfinite (inL[n]) ? inL[n] : 0.0f;
             const float sampleInR = stereoIn ? (std::isfinite (inR[n]) ? inR[n] : 0.0f) : sampleInL;
             const float dryL = sampleInL;
             const float dryR = sampleInR;
 
-            // --- Stereo Preserve: centred DNA orbit + stationary Side bed ---------
-            // The moving DNA itself is always driven by the common Mid signal.
-            // Therefore both antipodal strands carry the same programme material:
-            // Symmetry 100% means not only a geometric midpoint of zero, but also
-            // avoids content-dependent left/right bias caused by feeding unrelated
-            // L/R material into the two moving strands.
-            //
-            // The original stereo identity is retained separately as a pure Side
-            // bed (L += p*S, R -= p*S). A pure Side signal has equal energy on both
-            // output channels and zero Mid, so it preserves width without moving
-            // the DNA's centre. At p=0 this is exactly the schema-1 signal path.
             const float mid  = stereoIn ? 0.5f * (sampleInL + sampleInR) : sampleInL;
             const float side = stereoIn ? 0.5f * (sampleInL - sampleInR) : 0.0f;
 
-            // --- Orbit angle update -------------------------------------------------
             const double incA = orbitmath::angularIncrement ((double) rateHz, sampleRate);
             thetaA = orbitmath::wrapTwoPi (thetaA + incA);
             phaseAccumA = std::fmod (phaseAccumA + incA, phaseModulus);
@@ -237,19 +202,12 @@ namespace dnaorbit::dsp
                 }
                 else
                 {
-                    // Just transitioned from drifting to locked: capture the
-                    // current error once and ramp it to zero linearly over a
-                    // fixed, bounded duration (resyncSamplesTotal), so the
-                    // resync reliably completes within the target window
-                    // instead of trailing off exponentially forever.
                     if (resyncSamplesRemaining <= 0)
                     {
                         resyncStartError = orbitmath::shortestAngleDelta (thetaB, desired);
                         resyncSamplesRemaining = resyncSamplesTotal;
                     }
 
-                    // shortestAngleDelta(thetaB, desired) == desired - thetaB (shortest path), so
-                    // thetaB == desired - resyncStartError reproduces the original thetaB at fraction 1.
                     const double fraction = (double) resyncSamplesRemaining / (double) resyncSamplesTotal;
                     thetaB = orbitmath::wrapTwoPi (desired - resyncStartError * fraction);
                     --resyncSamplesRemaining;
@@ -264,13 +222,12 @@ namespace dnaorbit::dsp
             else
             {
                 symmetryLocked = false;
-                resyncSamplesRemaining = 0; // force a fresh error capture next time we relock
+                resyncSamplesRemaining = 0;
                 const double diff = orbitmath::rateDifferenceFactor ((double) symmetry, maxRateDifference);
                 const double incB = orbitmath::angularIncrement ((double) rateHz * (1.0 + diff), sampleRate);
                 thetaB = orbitmath::wrapTwoPi (thetaB + incB);
             }
 
-            // --- Strand A: position, depth cues, pan --------------------------------
             const double backAmountA = orbitmath::backAmount (thetaA);
             const float gainDbA = -maxBackAttenDb * (float) backAmountA * depth;
             const float backGainA = dbToGain (gainDbA);
@@ -289,7 +246,6 @@ namespace dnaorbit::dsp
             const float strandAL = delayedA * (float) gainsA.left * strandGain;
             const float strandAR = delayedA * (float) gainsA.right * strandGain;
 
-            // --- Strand B: position, depth cues, twist decorrelation, pan -----------
             const double backAmountB = orbitmath::backAmount (thetaB);
             const float gainDbB = -maxBackAttenDb * (float) backAmountB * depth;
             const float backGainB = dbToGain (gainDbB);
@@ -308,15 +264,9 @@ namespace dnaorbit::dsp
             const float strandBL = delayedB * (float) gainsB.left * strandGain;
             const float strandBR = delayedB * (float) gainsB.right * strandGain;
 
-            // --- Centred orbit wet + Core --------------------------------------------
             float wetL = strandAL + strandBL + mid * core;
             float wetR = strandAR + strandBR + mid * core;
 
-            // --- Geometry-based Mid-orbit level matching -----------------------------
-            // This prediction remains valid because the two strands and Core are
-            // deliberately driven by the same Mid source. The Side bed is added only
-            // after this compensation, so original stereo width is neither boosted by
-            // the orbit make-up gain nor included in a false same-source assumption.
             const float msPerSample = 1000.0f / (float) sampleRate;
             const auto coherence = [] (float deltaMs) { return std::exp (-std::abs (deltaMs) / 4.0f); };
 
@@ -344,25 +294,22 @@ namespace dnaorbit::dsp
             wetL *= wetMakeup;
             wetR *= wetMakeup;
 
-            // Preserve the original Side independently of the orbit. This fixes the
-            // anti-phase-silence failure while keeping the moving DNA content-centred.
             const float sideBed = side * stereoPreserve;
             wetL += sideBed;
             wetR -= sideBed;
 
-            // NULL CORE remains an explicitly Side-only creative mode. Apply it after
-            // the preserve bed so the definition stays literal for the complete Wet.
             const auto nulled = nullCoreProcess (wetL, wetR);
             wetL += (nulled.left  - wetL) * nullCoreAmount;
             wetR += (nulled.right - wetR) * nullCoreAmount;
 
-            // --- Dry/Wet mix, output gain ---------------------------------------------
             const auto dryWet = equalPowerMix (mix);
-            float finalL = dryWet.dry * dryL + dryWet.wet * wetL;
-            float finalR = dryWet.dry * dryR + dryWet.wet * wetR;
+            float processedL = (dryWet.dry * dryL + dryWet.wet * wetL) * outGain;
+            float processedR = (dryWet.dry * dryR + dryWet.wet * wetR) * outGain;
 
-            finalL *= outGain;
-            finalR *= outGain;
+            // Soft Bypass is deliberately linear: its endpoint must be exact Dry,
+            // and an equal-power law could create a correlated-signal gain bump.
+            float finalL = processedL + (dryL - processedL) * softBypass;
+            float finalR = processedR + (dryR - processedR) * softBypass;
 
             constexpr float antiDenormal = 1.0e-20f;
             finalL += antiDenormal; finalL -= antiDenormal;
@@ -393,7 +340,6 @@ namespace dnaorbit::dsp
             }
         }
 
-        // --- Publish meters for the UI (once per block) ------------------------------
         if (numSamples > 0)
         {
             const double invN = 1.0 / (double) numSamples;
@@ -403,8 +349,6 @@ namespace dnaorbit::dsp
             const float rms = (float) std::sqrt (0.5 * (meanLL + meanRR));
             uiOutputRms.store (std::isfinite (rms) ? rms : 0.0f, std::memory_order_relaxed);
 
-            // Normalised L/R correlation: +1 mono, 0 uncorrelated, -1 out of phase.
-            // Undefined for silence, so hold at +1 (mono-safe) rather than dividing by zero.
             const double denom = std::sqrt (meanLL * meanRR);
             const float correlation = denom > 1.0e-12
                                      ? (float) std::clamp ((sumLR * invN) / denom, -1.0, 1.0)
