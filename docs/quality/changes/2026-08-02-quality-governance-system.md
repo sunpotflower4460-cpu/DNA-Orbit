@@ -5,6 +5,7 @@
 - Owner: repository product owner
 - Branch / PR: agent/world-class-dsp-phase3 / PR #2
 - Risk tier: R4 / CONSTITUTIONAL
+- Covered paths: docs/governance/*; quality/*; scripts/quality-*; scripts/agent-preflight.sh; scripts/validate-local.sh; AGENTS.md; CLAUDE.md; CONTRIBUTING.md; .github/pull_request_template.md; docs/claude-code/README.md; docs/claude-code/QUALITY_SCORECARD.md; docs/commercial-upgrade/manifest.json; docs/commercial-upgrade/decisions/ADR-010-quality-governance-system.md; .claude/skills/quality-governance/SKILL.md; .claude/agents/quality-governor.md; docs/quality/*
 - Decision: PROPOSED
 
 ## User and musical outcome
@@ -52,7 +53,7 @@ Future implementation must improve DNA Orbit without drifting from its musical i
 
 ## Evidence plan and rejection conditions
 
-- Automated tests: auditor self-test plus file, hash, risk, record, ADR, review, and exception checks.
+- Automated tests: auditor self-test plus file, hash, risk, path coverage, record, ADR, review, and exception checks.
 - Numerical/audio measurements: not applicable.
 - Level-matched listening: not applicable.
 - UI/interaction evidence: not applicable.
@@ -79,11 +80,13 @@ Remove the governance audit from local validation first if it behaves incorrectl
 - Compiled: not applicable to documents; scripts not locally executed here.
 - Tested: not yet run on the development Mac.
 - Measured: not yet.
+- Governance-audited: not yet run locally.
 - Screenshot-verified: not applicable.
 - Keyboard-tested: not applicable.
 - Listened: not applicable.
 - Host-validated: not yet.
 - Observed-user validated: not yet.
+- Owner-approved where required: pending for constitution wording.
 - Release-ready: no.
 - Remaining debt/exceptions: no exception granted; wording approval and local execution remain open.
 - Final decision and rationale: PROPOSED / IMPLEMENTED FOR DRAFT.
