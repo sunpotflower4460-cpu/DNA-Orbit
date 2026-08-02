@@ -20,6 +20,41 @@ private:
     using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
     using ComboAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
+    class PillLabel : public juce::Label
+    {
+    public:
+        void setPillColours (juce::Colour fillColour,
+                             juce::Colour outlineColour,
+                             float cornerRadius = 8.0f)
+        {
+            fill = fillColour;
+            outline = outlineColour;
+            radius = cornerRadius;
+            repaint();
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            const auto bounds = getLocalBounds().toFloat();
+            if (! fill.isTransparent())
+            {
+                g.setColour (fill);
+                g.fillRoundedRectangle (bounds, radius);
+            }
+            if (! outline.isTransparent())
+            {
+                g.setColour (outline);
+                g.drawRoundedRectangle (bounds.reduced (0.5f), radius, 1.0f);
+            }
+            juce::Label::paint (g);
+        }
+
+    private:
+        juce::Colour fill { juce::Colours::transparentBlack };
+        juce::Colour outline { juce::Colours::transparentBlack };
+        float radius = 8.0f;
+    };
+
     struct Knob
     {
         juce::Slider slider { juce::Slider::RotaryHorizontalVerticalDrag,
@@ -60,7 +95,8 @@ private:
     int currentPage = 0;
 
     juce::ComboBox presetBox;
-    juce::Label presetLabel, presetStateLabel;
+    juce::Label presetLabel;
+    PillLabel presetStateLabel;
     juce::TextButton revertButton;
     int currentPresetIndex = -1;
 
@@ -84,7 +120,8 @@ private:
     std::unique_ptr<ComboAttachment> phaseModeAttachment;
     std::unique_ptr<ComboAttachment> directionAttachment;
 
-    juce::Label guideLabel, statusLabel, diagnosticLabel, warningLabel;
+    juce::Label guideLabel;
+    PillLabel statusLabel, diagnosticLabel, warningLabel;
     std::unique_ptr<juce::ParameterAttachment> nullCoreWatcher;
 
     juce::Rectangle<int> visualCardBounds;
@@ -94,7 +131,7 @@ private:
     juce::Rectangle<int> outputCardBounds;
 
     static constexpr int minimumEditorWidth = 820;
-    static constexpr int minimumEditorHeight = 620;
+    static constexpr int minimumEditorHeight = 650;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DNAOrbitAudioProcessorEditor)
 };
