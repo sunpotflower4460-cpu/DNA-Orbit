@@ -36,6 +36,7 @@ namespace dnaorbit::dsp
             float mix01      = 0.35f;
             float outputDb   = 0.0f;
             bool  autoGain   = true;
+            bool  softBypass = false;
 
             /**
              * Amount of the original Side signal retained as a stationary
@@ -84,21 +85,8 @@ namespace dnaorbit::dsp
 
         struct VisualState
         {
-            /**
-             * Unwrapped total orbit phase of strand A, wrapped only at a large
-             * multiple of 2*pi. The UI reconstructs its history from this: a wrapped
-             * angle would be ambiguous to unwrap after a message-thread stall (at
-             * 4 Hz a 125 ms stall already exceeds pi), which would make the helix
-             * jump or briefly run backwards.
-             */
             double phaseA = 0.0;
-            /**
-             * Relative phase thetaB - thetaA, wrapped to [0, 2*pi). Publishing the
-             * relative phase rather than thetaB keeps the antipodal invariant exact:
-             * phi == pi means the strand midpoint is zero, whatever else drifts.
-             */
             float phi = 0.0f;
-
             float thetaA = 0.0f;
             float thetaB = 0.0f;
             float radius01 = 0.0f;
@@ -107,10 +95,7 @@ namespace dnaorbit::dsp
             float centroidDistance = 0.0f;
             float symmetry01 = 1.0f;
             bool  nullCoreOn = false;
-
-            /** Output RMS (0..1-ish), used to make the visuals react to the audio. */
             float outputRms = 0.0f;
-            /** L/R correlation of the output: +1 = mono, 0 = uncorrelated, -1 = out of phase. */
             float correlation = 1.0f;
         };
 
@@ -121,28 +106,15 @@ namespace dnaorbit::dsp
 
         double sampleRate = 44100.0;
         bool   isPrepared = false;
-
-        // Orbit state (double precision to avoid long-run drift).
         double thetaA = 0.0;
         double thetaB = orbitmath::pi;
-
-        /**
-         * Unwrapped phase accumulator for the UI, wrapped at a large multiple of
-         * 2*pi so it never loses precision (double epsilon at this magnitude is
-         * ~4e-12 rad) and so the UI can unwrap it unambiguously.
-         */
         double phaseAccumA = 0.0;
         static constexpr double phaseModulus = orbitmath::twoPi * 4096.0;
         bool   symmetryLocked = true;
-
-        // Fixed-duration linear resync ramp used when Symmetry returns to 100%
-        // (see process()). Bounded and deterministic, unlike an exponential
-        // tail, so it reliably completes within resyncDurationSeconds.
         double resyncStartError = 0.0;
         int    resyncSamplesRemaining = 0;
         int    resyncSamplesTotal = 1;
 
-        // Smoothed parameters.
         juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> radiusSmoothed;
         juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> depthSmoothed;
         juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> symmetrySmoothed;
@@ -154,10 +126,10 @@ namespace dnaorbit::dsp
         juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> rateHzSmoothed;
         juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> autoGainAmountSmoothed;
         juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> stereoPreserveSmoothed;
+        juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> softBypassSmoothed;
 
         bool  nullCoreTarget = false;
 
-        // Per-strand processing chains.
         OnePoleLowPass lowPassA, lowPassB;
         juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Lagrange3rd> delayA { 1 << 14 };
         juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Lagrange3rd> delayB { 1 << 14 };
@@ -170,10 +142,10 @@ namespace dnaorbit::dsp
         static constexpr float maxBackDelayMs    = 8.0f;
         static constexpr double maxRateDifference = 0.03;
         static constexpr double symmetryLockThreshold = 0.999;
-        static constexpr double resyncDurationSeconds = 0.2; // within the 100-300ms spec window
-        static constexpr float  maxWetMakeupGain = 4.0f;     // +12 dB ceiling
+        static constexpr double resyncDurationSeconds = 0.2;
+        static constexpr float  maxWetMakeupGain = 4.0f;
+        static constexpr double softBypassSeconds = 0.06;
 
-        // Published for the UI thread; written once per block.
         std::atomic<float> uiThetaA { 0.0f };
         std::atomic<float> uiThetaB { static_cast<float> (orbitmath::pi) };
         std::atomic<float> uiRadius { 0.8f };
@@ -187,11 +159,6 @@ namespace dnaorbit::dsp
         std::atomic<double> uiPhaseA { 0.0 };
         std::atomic<float> uiPhi { (float) orbitmath::pi };
 
-        // std::atomic<double> is not guaranteed lock-free by the standard; on a
-        // target without native 8-byte atomics it would silently fall back to a
-        // lock, breaking the audio thread's no-locking guarantee. True on every
-        // platform this plugin currently ships for (x86-64, ARM64); fails loudly
-        // at compile time rather than silently at runtime if that ever changes.
         static_assert (std::atomic<double>::is_always_lock_free,
                        "uiPhaseA must be lock-free on every platform this plugin ships for");
 
