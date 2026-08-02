@@ -7,6 +7,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(DNA_ORBIT_BUILD_TESTS "Build the DNA Orbit unit test suite" ON)
+option(DNA_ORBIT_BUILD_TOOLS "Build the DNA Orbit screenshot tool" OFF)
+option(DNA_ORBIT_BUILD_BENCHMARKS "Build the deterministic DSP benchmark" OFF)
 
 set(DNA_ORBIT_SANITIZERS "" CACHE STRING
     "Comma-separated sanitizers to build with, e.g. 'address,undefined' (GCC/Clang only)")
@@ -95,8 +97,6 @@ if (DNA_ORBIT_BUILD_TESTS)
     add_subdirectory(Tests)
 endif()
 
-option(DNA_ORBIT_BUILD_TOOLS "Build the DNA Orbit screenshot tool" OFF)
-
 if (DNA_ORBIT_BUILD_TOOLS)
     add_executable(DNAOrbitRenderShots Tools/RenderShots.cpp)
     target_include_directories(DNAOrbitRenderShots PRIVATE Source)
@@ -105,6 +105,17 @@ if (DNA_ORBIT_BUILD_TOOLS)
         DNAOrbit
         juce::juce_audio_processors
         juce::juce_gui_basics
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+endif()
+
+if (DNA_ORBIT_BUILD_BENCHMARKS)
+    add_executable(DNAOrbitBenchmark Tools/BenchmarkDSP.cpp)
+    target_include_directories(DNAOrbitBenchmark PRIVATE Source)
+    target_link_libraries(DNAOrbitBenchmark PRIVATE
+        DNAOrbit
+        juce::juce_audio_basics
+        juce::juce_dsp
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
 endif()
