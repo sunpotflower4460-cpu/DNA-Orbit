@@ -1,6 +1,5 @@
 # DNA Orbit test suite. Reuses the already-compiled PluginProcessor / HelixEngine
-# object code from the main DNAOrbit "shared code" target so PluginProcessor's
-# JucePlugin_* macros never need to be redefined here.
+# object code from the main DNAOrbit shared-code target.
 
 add_executable(DNAOrbitTests
     TestMain.cpp
@@ -16,6 +15,8 @@ add_executable(DNAOrbitTests
     SoftBypassTests.cpp
     CorrelationMixTests.cpp
     CommercialParameterStateTests.cpp
+    MusicalDspTests.cpp
+    TransportPhaseTests.cpp
 )
 
 target_include_directories(DNAOrbitTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
