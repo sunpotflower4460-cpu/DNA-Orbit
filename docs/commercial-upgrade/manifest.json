@@ -25,6 +25,59 @@
     "decisions/ADR-007-bass-anchor-and-character.md",
     "decisions/ADR-008-host-phase-lock.md"
   ],
+  "claude_code_foundation": {
+    "always_loaded": [
+      "AGENTS.md",
+      "CLAUDE.md"
+    ],
+    "project_settings": [
+      ".claude/settings.json"
+    ],
+    "scoped_rules": [
+      ".claude/rules/dsp-physics.md",
+      ".claude/rules/audio-quality.md",
+      ".claude/rules/state-compatibility.md",
+      ".claude/rules/tests-and-validation.md",
+      ".claude/rules/ui-visual-truth.md",
+      ".claude/rules/docs-and-claims.md"
+    ],
+    "skills": [
+      ".claude/skills/start-dsp-task/SKILL.md",
+      ".claude/skills/research-primary-sources/SKILL.md",
+      ".claude/skills/physics-audit/SKILL.md",
+      ".claude/skills/audio-quality-gate/SKILL.md",
+      ".claude/skills/experiment-design/SKILL.md",
+      ".claude/skills/optimize-dsp-safely/SKILL.md",
+      ".claude/skills/adversarial-review/SKILL.md",
+      ".claude/skills/release-gate/SKILL.md"
+    ],
+    "read_only_subagents": [
+      ".claude/agents/physics-auditor.md",
+      ".claude/agents/audio-quality-auditor.md",
+      ".claude/agents/realtime-safety-reviewer.md",
+      ".claude/agents/validation-architect.md"
+    ],
+    "deep_standards": [
+      "../claude-code/README.md",
+      "../claude-code/CURRENT_ARCHITECTURE_MAP.md",
+      "../claude-code/DEVELOPMENT_OPERATING_SYSTEM.md",
+      "../claude-code/PHYSICS_FIDELITY_STANDARD.md",
+      "../claude-code/PHYSICAL_AUDIO_ROADMAP.md",
+      "../claude-code/AUDIO_QUALITY_STANDARD.md",
+      "../claude-code/EXPERIMENT_AND_VALIDATION_PROTOCOL.md",
+      "../claude-code/QUALITY_SCORECARD.md",
+      "../claude-code/ASSUMPTIONS_REGISTER.md",
+      "../claude-code/PROMPT_LIBRARY.md",
+      "../claude-code/REFERENCE_SOURCES.md",
+      "../claude-code/OPTIONAL_AUTOMATION.md"
+    ],
+    "experiment_records": "../experiments/",
+    "local_commands": [
+      "bash scripts/agent-preflight.sh",
+      "bash scripts/static-realtime-audit.sh",
+      "bash scripts/validate-local.sh"
+    ]
+  },
   "implemented_workstreams": [
     "legacy state migration",
     "deterministic factory presets",
@@ -36,11 +89,17 @@
     "Natural Vivid Deep Character",
     "Free Retrigger Host Lock phase modes",
     "time-signature-aware bar divisions",
-    "local Release sanitizer and benchmark workflow",
-    "keyboard focus and dependent-control UI states"
+    "local Release sanitizer screenshot and benchmark workflow",
+    "keyboard focus and dependent-control UI states",
+    "Claude Code project memory and scoped engineering rules",
+    "independent physics audio quality realtime and validation reviewers",
+    "physical fidelity audio quality experiment and release standards",
+    "primary-source research and evidence-based optimization workflows"
   ],
   "local_validation": {
-    "command": "bash scripts/validate-local.sh",
+    "preflight_command": "bash scripts/agent-preflight.sh",
+    "realtime_audit_command": "bash scripts/static-realtime-audit.sh",
+    "complete_command": "bash scripts/validate-local.sh",
     "required_before_ready_for_review": true,
     "github_actions_enabled": false
   },
