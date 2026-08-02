@@ -1,6 +1,6 @@
 # DNA Orbit Quality Scorecard
 
-Use this scorecard for substantial PRs and before changing a PR from draft. Scores support discussion; they do not override blockers.
+Use this scorecard for substantial PRs and before changing a PR from draft. Scores support discussion; they do not override the Product Constitution, policy gates, Blockers, or unresolved High findings.
 
 ## Scoring
 
@@ -11,7 +11,7 @@ Use this scorecard for substantial PRs and before changing a PR from draft. Scor
 - **4 — strong multi-condition evidence**
 - **5 — exceptional, reproducible, independently reviewed evidence**
 
-Any Blocker or unresolved High finding means **NOT READY**, regardless of average.
+Any constitutional conflict, Blocker, expired active exception, or unresolved release-relevant High finding means **NOT READY**, regardless of average.
 
 ## A. Product outcome
 
@@ -21,7 +21,8 @@ Any Blocker or unresolved High finding means **NOT READY**, regardless of averag
 | Change preserves DNA Orbit identity | | |
 | Default behavior is useful without technical setup | | |
 | Complexity is justified by user value | | |
-| Tradeoffs are documented | | |
+| Whole-product benefit exceeds local optimisation | | |
+| Tradeoffs and rejection conditions are documented | | |
 
 ## B. Physical and mathematical fidelity
 
@@ -109,7 +110,8 @@ Any Blocker or unresolved High finding means **NOT READY**, regardless of averag
 | Keyboard focus and resets work | | |
 | Accessible names and warning states work | | |
 | Hidden editor avoids waste | | |
-| Screenshots inspected | | |
+| Screenshot matrix inspected | | |
+| First-use workflow observed where applicable | | |
 
 ## I. Documentation and decision trail
 
@@ -118,6 +120,7 @@ Any Blocker or unresolved High finding means **NOT READY**, regardless of averag
 | README reflects current branch | | |
 | ADR captures rationale and alternatives | | |
 | Assumptions register updated | | |
+| Change record reflects actual current scope | | |
 | Manual gates updated | | |
 | Claims distinguish implemented/tested/listened | | |
 | Primary references recorded | | |
@@ -136,6 +139,24 @@ Any Blocker or unresolved High finding means **NOT READY**, regardless of averag
 | License obligations confirmed | | |
 | Artifact hashes and versioning recorded | | |
 
+## K. Constitution and governance
+
+| Item | Score | Evidence / open issue |
+|---|---:|---|
+| Product Constitution version/hash verified | | |
+| Affected pillars and constitutional fit are explicit | | |
+| Risk tier matches worst credible consequence | | |
+| Rejection and rollback conditions are concrete | | |
+| Quality-ratchet items are named and preserved | | |
+| Required ADR and independent review exist | | |
+| Scope expansion updated the change contract | | |
+| Exceptions are scoped, owned, approved, and unexpired | | |
+| Quality debt has owner and objective exit condition | | |
+| Development governance audit passes | | |
+| Release governance audit passes where applicable | | |
+| Product-owner approval is recorded where required | | |
+| Release decision is recorded separately from merge | | |
+
 ## Blocker checklist
 
 Any checked item blocks readiness:
@@ -151,18 +172,34 @@ Any checked item blocks readiness:
 - [ ] required test/build/validator fails;
 - [ ] known major artifact in normal use;
 - [ ] unlicensed or unsigned distribution action;
-- [ ] evidence claimed but not actually run.
+- [ ] evidence claimed but not actually run;
+- [ ] constitutional conflict or unapproved constitutional amendment;
+- [ ] required R2–R4 change record missing or stale relative to actual scope;
+- [ ] required R3/R4 ADR or independent review missing;
+- [ ] expired active exception or exception outside its written scope;
+- [ ] Blocker debt, or High debt inside shipping scope;
+- [ ] established quality ratchet weakened without explicit regression decision;
+- [ ] release inferred from merge/build rather than separately authorised.
 
 ## Verdict
 
 - Current commit:
+- Constitution version/hash:
+- Change record:
+- Risk tier proposed / reviewed:
 - Reviewer(s):
+- Governance mode/result:
+- Product-owner approval status:
+- Active exceptions:
+- Active quality debt:
 - Blockers:
 - High findings:
 - Scores by section:
 - Automated status:
 - Listening status:
+- UI/UX status:
 - Host status:
 - Distribution status:
-- Final verdict:
+- Final decision: ACCEPT / ACCEPT WITH DEBT / EXPERIMENT ONLY / REVISE / REJECT / ROLL BACK
+- Release decision: HOLD / eligible for owner decision / authorised
 - Next action:
