@@ -86,6 +86,7 @@ namespace dnaorbit::dsp
         int phaseModeTarget = 0;
         float startPhaseDegreesTarget = 0.0f;
         bool reverseDirectionTarget = false;
+        bool transportPlayingTarget = false;
         bool transportJustStartedTarget = false;
         bool hostPositionValidTarget = false;
         double hostPpqPositionTarget = 0.0;
