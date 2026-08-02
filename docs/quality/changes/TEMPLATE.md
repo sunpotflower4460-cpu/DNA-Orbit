@@ -5,7 +5,10 @@
 - Owner:
 - Branch / PR:
 - Risk tier: R0 / R1 / R2 / R3 / R4
+- Covered paths: <semicolon-separated repository globs>
 - Decision: PROPOSED / ACCEPT / ACCEPT WITH DEBT / EXPERIMENT ONLY / REVISE / REJECT / ROLL BACK
+
+`Covered paths` must describe the actual files governed by this record. The automated audit requires every R2+ changed path to match at least one changed record, and the declared risk must be at least as high as the covered path risk.
 
 ## User and musical outcome
 
@@ -77,11 +80,13 @@ Smallest safe revert, feature flag, compatibility fallback, or migration reversa
 - Compiled:
 - Tested:
 - Measured:
+- Governance-audited:
 - Screenshot-verified:
 - Keyboard-tested:
 - Listened:
 - Host-validated:
 - Observed-user validated:
+- Owner-approved where required:
 - Release-ready:
 - Remaining debt/exceptions:
 - Final decision and rationale:
