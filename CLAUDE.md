@@ -9,7 +9,8 @@ Keep this file concise. Procedures belong in `.claude/skills/`; file-specific ru
 - Run `bash scripts/agent-preflight.sh` before substantial work.
 - Read the active PR, current diff, recent commits, `docs/claude-code/CURRENT_ARCHITECTURE_MAP.md`, and relevant ADRs.
 - Use `start-dsp-task` for non-trivial DSP work.
-- Use plan mode for changes that touch DSP architecture, state schema, transport behavior, bypass, saved-session compatibility, or more than three production files.
+- Use `ui-ux-audit` for non-trivial editor, LookAndFeel, control grouping, wording, screenshot, accessibility, or visualiser presentation work.
+- Use plan mode for changes that touch DSP architecture, state schema, transport behavior, bypass, saved-session compatibility, UI information architecture, or more than three production files.
 - Do not begin a broad rewrite until the existing implementation and tests have been traced end-to-end.
 
 ## Required quality workflow
@@ -24,6 +25,14 @@ For DSP, acoustics, spatial geometry, modulation, filter, delay, gain, phase, or
 6. Delegate independent read-only reviews to `physics-auditor`, `audio-quality-auditor`, `realtime-safety-reviewer`, and `validation-architect` when the change is non-trivial.
 7. Add tests that encode the intended invariant before declaring success.
 8. Run `bash scripts/static-realtime-audit.sh` and the relevant build/tests.
+
+For UI/UX changes:
+
+1. Follow `ui-ux-audit` and `docs/claude-code/UI_UX_STANDARD.md`.
+2. Preserve parameter/state contracts and DSP visual truth.
+3. Delegate an independent review to `ui-ux-auditor` for non-trivial changes.
+4. Generate and inspect the required minimum, standard, wide, warning, Sync, and Bypass screenshots.
+5. Distinguish screenshot-verified, keyboard-tested, host-validated, and observed-user evidence.
 
 Before presenting work as complete, invoke or follow `adversarial-review` and `release-gate`.
 
@@ -49,8 +58,11 @@ Use these states precisely:
 - **Compiled** — relevant target built successfully.
 - **Tested** — named automated tests passed.
 - **Measured** — named metrics and environment recorded.
+- **Screenshot-verified** — required renders were generated and visually inspected.
+- **Keyboard-tested** — focus traversal and activation were manually checked.
 - **Listened** — level-matched listening completed on named material.
 - **Host-validated** — named DAWs/formats passed.
+- **Observed-user validated** — a target user completed the intended workflow without coaching or hidden assistance.
 - **Release-ready** — every applicable gate in `MANUAL_REQUIRED.md` passed.
 
 Never collapse these into a generic “done.”
