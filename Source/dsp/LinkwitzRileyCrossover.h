@@ -6,15 +6,7 @@
 
 namespace dnaorbit::dsp
 {
-    /**
-     * Allocation-free fourth-order Linkwitz-Riley crossover.
-     *
-     * Each output is two cascaded second-order Butterworth sections at the
-     * same cutoff. The low/high paths therefore have matching phase at the
-     * crossover and sum flat when recombined. Coefficients are only updated
-     * when the caller changes the cutoff; processSample() is multiplication
-     * and addition only.
-     */
+    /** Allocation-free fourth-order Linkwitz-Riley crossover. */
     class LinkwitzRileyCrossover
     {
     public:
@@ -22,6 +14,7 @@ namespace dnaorbit::dsp
         {
             sampleRate = newSampleRate > 0.0 ? newSampleRate : 44100.0;
             lastCutoffHz = -1.0f;
+            bypassed = false;
             reset();
             setCutoffHz (120.0f);
         }
@@ -39,11 +32,19 @@ namespace dnaorbit::dsp
             const float upper = std::max (20.0f, (float) sampleRate * 0.45f);
             const float clamped = std::clamp (std::isfinite (cutoffHz) ? cutoffHz : 120.0f,
                                               20.0f, upper);
+            const bool shouldBypass = clamped <= 20.1f;
 
-            // Avoid four trigonometric coefficient rebuilds when a control-rate
-            // update produces the same rounded cutoff as the previous update.
-            if (std::abs (clamped - lastCutoffHz) < 0.01f)
+            if (shouldBypass != bypassed)
+            {
+                bypassed = shouldBypass;
+                reset();
+            }
+
+            if (bypassed || std::abs (clamped - lastCutoffHz) < 0.01f)
+            {
+                lastCutoffHz = clamped;
                 return;
+            }
 
             lastCutoffHz = clamped;
             low1.setLowPass (sampleRate, clamped);
@@ -54,6 +55,13 @@ namespace dnaorbit::dsp
 
         void processSample (float input, float& low, float& high) noexcept
         {
+            if (bypassed)
+            {
+                low = 0.0f;
+                high = input;
+                return;
+            }
+
             low = low2.process (low1.process (input));
             high = high2.process (high1.process (input));
         }
@@ -62,28 +70,15 @@ namespace dnaorbit::dsp
         class Biquad
         {
         public:
-            void reset() noexcept
-            {
-                z1 = 0.0f;
-                z2 = 0.0f;
-            }
-
-            void setLowPass (double sampleRate, float cutoffHz) noexcept
-            {
-                setCoefficients (sampleRate, cutoffHz, false);
-            }
-
-            void setHighPass (double sampleRate, float cutoffHz) noexcept
-            {
-                setCoefficients (sampleRate, cutoffHz, true);
-            }
+            void reset() noexcept { z1 = z2 = 0.0f; }
+            void setLowPass (double sr, float cutoff) noexcept { setCoefficients (sr, cutoff, false); }
+            void setHighPass (double sr, float cutoff) noexcept { setCoefficients (sr, cutoff, true); }
 
             float process (float input) noexcept
             {
                 const float output = b0 * input + z1;
                 z1 = b1 * input - a1 * output + z2;
                 z2 = b2 * input - a2 * output;
-
                 constexpr float antiDenormal = 1.0e-20f;
                 z1 += antiDenormal; z1 -= antiDenormal;
                 z2 += antiDenormal; z2 -= antiDenormal;
@@ -91,15 +86,14 @@ namespace dnaorbit::dsp
             }
 
         private:
-            void setCoefficients (double sampleRate, float cutoffHz, bool highPass) noexcept
+            void setCoefficients (double sr, float cutoff, bool highPass) noexcept
             {
                 constexpr double q = 0.7071067811865475244;
-                const double omega = orbitmath::twoPi * (double) cutoffHz / sampleRate;
+                const double omega = orbitmath::twoPi * (double) cutoff / sr;
                 const double cosine = std::cos (omega);
                 const double sine = std::sin (omega);
                 const double alpha = sine / (2.0 * q);
                 const double a0 = 1.0 + alpha;
-
                 const double common = highPass ? 0.5 * (1.0 + cosine)
                                                : 0.5 * (1.0 - cosine);
                 b0 = (float) (common / a0);
@@ -116,6 +110,7 @@ namespace dnaorbit::dsp
 
         double sampleRate = 44100.0;
         float lastCutoffHz = -1.0f;
+        bool bypassed = false;
         Biquad low1, low2, high1, high2;
     };
 }
