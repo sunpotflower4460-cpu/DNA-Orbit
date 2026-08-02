@@ -68,7 +68,8 @@ private:
     int loadedSchemaVersion = dnaorbit::params::currentStateSchemaVersion;
     bool previousTransportPlaying = false;
 
-    dnaorbit::dsp::HelixEngine::Parameters currentParameterSnapshot() noexcept;
+    /** includeHostPosition must only be true from processBlock callbacks. */
+    dnaorbit::dsp::HelixEngine::Parameters currentParameterSnapshot (bool includeHostPosition) noexcept;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DNAOrbitAudioProcessor)
 };
