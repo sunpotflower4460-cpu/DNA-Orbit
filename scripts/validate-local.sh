@@ -9,31 +9,35 @@ RELEASE_BUILD="${DNA_ORBIT_RELEASE_BUILD:-build-local-release}"
 SANITIZER_BUILD="${DNA_ORBIT_SANITIZER_BUILD:-build-local-asan}"
 BENCHMARK_SECONDS="${DNA_ORBIT_BENCHMARK_SECONDS:-2}"
 SCREENSHOT_DIR="${DNA_ORBIT_SCREENSHOT_DIR:-$RELEASE_BUILD/screenshots}"
+export DNA_ORBIT_GOVERNANCE_REPORT="${DNA_ORBIT_GOVERNANCE_REPORT:-$RELEASE_BUILD/governance-report.json}"
 
 printf '\n== DNA Orbit local validation ==\n'
 printf 'Root: %s\nJobs: %s\n\n' "$ROOT_DIR" "$JOBS"
 
-printf '== 1/8 Agent preflight ==\n'
+printf '== 1/9 Agent preflight ==\n'
 bash scripts/agent-preflight.sh
 
-printf '\n== 2/8 Static realtime audit ==\n'
+printf '\n== 2/9 Quality governance audit ==\n'
+bash scripts/quality-gate.sh
+
+printf '\n== 3/9 Static realtime audit ==\n'
 bash scripts/static-realtime-audit.sh
 
-printf '\n== 3/8 Release configure ==\n'
+printf '\n== 4/9 Release configure ==\n'
 cmake -S . -B "$RELEASE_BUILD" \
   -DCMAKE_BUILD_TYPE=Release \
   -DDNA_ORBIT_BUILD_TESTS=ON \
   -DDNA_ORBIT_BUILD_TOOLS=ON \
   -DDNA_ORBIT_BUILD_BENCHMARKS=ON
 
-printf '\n== 4/8 Release build ==\n'
+printf '\n== 5/9 Release build ==\n'
 cmake --build "$RELEASE_BUILD" --config Release -j "$JOBS"
 
-printf '\n== 5/8 Unit tests ==\n'
+printf '\n== 6/9 Unit tests ==\n'
 ctest --test-dir "$RELEASE_BUILD" -C Release --output-on-failure \
   | tee "$RELEASE_BUILD/ctest-release.txt"
 
-printf '\n== 6/8 Headless screenshot generation ==\n'
+printf '\n== 7/9 Headless screenshot generation ==\n'
 RENDER_CANDIDATES=(
   "$RELEASE_BUILD/DNAOrbitRenderShots"
   "$RELEASE_BUILD/Release/DNAOrbitRenderShots"
@@ -58,7 +62,7 @@ else
   exit 1
 fi
 
-printf '\n== 7/8 Sanitizer configure/build/test ==\n'
+printf '\n== 8/9 Sanitizer configure/build/test ==\n'
 if [[ "$(uname -s)" == "Darwin" || "$(uname -s)" == "Linux" ]]; then
   cmake -S . -B "$SANITIZER_BUILD" \
     -DCMAKE_BUILD_TYPE=Debug \
@@ -73,7 +77,7 @@ else
   printf 'Sanitizer step skipped on this platform.\n'
 fi
 
-printf '\n== 8/8 DSP benchmark ==\n'
+printf '\n== 9/9 DSP benchmark ==\n'
 BENCHMARK_CANDIDATES=(
   "$RELEASE_BUILD/DNAOrbitBenchmark"
   "$RELEASE_BUILD/Release/DNAOrbitBenchmark"
@@ -98,4 +102,6 @@ fi
 
 printf '\nAutomated local validation completed.\n'
 printf 'Evidence directory: %s\n' "$RELEASE_BUILD"
-printf 'Remaining manual gates: screenshot inspection, pluginval, VST3 Validator, auval, level-matched listening, real DAW tests, signing and packaging.\n'
+printf 'Governance report: %s\n' "$DNA_ORBIT_GOVERNANCE_REPORT"
+printf 'Before release authorisation also run: bash scripts/quality-gate.sh --release\n'
+printf 'Remaining manual gates: owner decisions, screenshot inspection, pluginval, VST3 Validator, auval, level-matched listening, real DAW tests, signing and packaging.\n'
