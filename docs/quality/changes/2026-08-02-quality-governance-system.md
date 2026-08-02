@@ -16,6 +16,7 @@ Future implementation must improve DNA Orbit without drifting from its musical i
 
 - Affected pillars: P1–P10.
 - Why this belongs in DNA Orbit: it protects the two-strand/centre concept and establishes a stable decision hierarchy for DSP, physics, UI, state, and release work.
+- Why it does not turn the product into a generic effect: governance explicitly rejects unrelated feature accumulation and protects the musical orbit/centre identity.
 - Whole-product benefit: local improvements cannot silently override higher product priorities.
 - Constitutional conflict: none known; final wording review remains a release gate.
 
@@ -59,14 +60,14 @@ Future implementation must improve DNA Orbit without drifting from its musical i
 - UI/interaction evidence: not applicable.
 - Host/validator evidence: full local validation must still run.
 - Performance evidence: local execution time should remain negligible.
-- Reject or roll back if the system blocks normal low-risk work, is easily bypassed, misstates intent, or rewards mechanical box-checking.
+- What result would make us reject or roll back the change: the system blocks normal low-risk work, is easily bypassed, misstates intent, produces false PASS, or rewards mechanical box-checking.
 
 ## Independent review
 
 - Required reviewers: quality governor, validation architect, and product-owner wording review before release.
 - Review records: `docs/quality/reviews/2026-08-02-quality-governance-review.md`.
-- Blocker findings: none established without local execution.
-- High findings: local script execution and first real agent use remain unverified.
+- Blocker findings: release remains blocked until owner wording review and successful local governance execution.
+- High findings: local script execution and first real agent use remain unverified; semantic staleness still requires independent judgment.
 - Disagreements and resolution: none recorded.
 
 ## Rollback boundary
