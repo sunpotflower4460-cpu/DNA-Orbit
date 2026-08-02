@@ -77,7 +77,8 @@ namespace dnaorbit::dsp
         dryWetCorrelationEstimate = 0.0f;
         hostLockWasActive = false;
         expectedNextHostPhase = 0.0;
-        hostCorrectionStart = 0.0;
+        hostCorrectionStartA = 0.0;
+        hostCorrectionStartB = 0.0;
         hostCorrectionSamplesRemaining = 0;
         controlSamplesRemaining = 0;
 
@@ -169,7 +170,6 @@ namespace dnaorbit::dsp
         phaseModeTarget = std::clamp (p.phaseMode, 0, 2);
         startPhaseDegreesTarget = std::clamp (sanitizeParam (p.startPhaseDegrees, 0.0f), 0.0f, 360.0f);
         reverseDirectionTarget = p.reverseDirection;
-        transportPlayingTarget = p.transportPlaying;
         transportJustStartedTarget = p.transportJustStarted;
         hostPositionValidTarget = p.hostPositionValid && std::isfinite (p.hostPpqPosition);
         hostPpqPositionTarget = hostPositionValidTarget ? p.hostPpqPosition : 0.0;
@@ -199,16 +199,30 @@ namespace dnaorbit::dsp
         const bool retriggerNow = phaseModeTarget == 1 && transportJustStartedTarget;
         const double hostRate = (double) rateHzSmoothed.getTargetValue();
         const double hostIncrement = orbitmath::angularIncrement (hostRate, sampleRate);
+        const double hostPpqCycles = hostPpqPositionTarget / cycleBeatsTarget;
         const double hostRawStart = startRadians
-                                  + directionSign * orbitmath::twoPi
-                                    * (hostPpqPositionTarget / cycleBeatsTarget);
+                                  + directionSign * orbitmath::twoPi * hostPpqCycles;
         const double hostBlockPhase = orbitmath::wrapTwoPi (hostRawStart);
+
+        const float targetSymmetry = symmetrySmoothed.getTargetValue();
+        const bool targetLocked = targetSymmetry >= (float) symmetryLockThreshold;
+        const double targetDiff = orbitmath::rateDifferenceFactor ((double) targetSymmetry,
+                                                                    maxRateDifference);
+        const double targetBScale = targetLocked ? 1.0 : 1.0 + targetDiff;
+        const double hostRawStartB = startRadians + orbitmath::pi
+                                   + directionSign * orbitmath::twoPi
+                                     * hostPpqCycles * targetBScale;
+        const double hostBlockPhaseB = orbitmath::wrapTwoPi (hostRawStartB);
 
         if (useHostLock)
         {
             if (! hostLockWasActive || transportJustStartedTarget)
             {
                 thetaA = hostBlockPhase;
+                thetaB = hostBlockPhaseB;
+                symmetryLocked = targetLocked;
+                hostCorrectionStartA = 0.0;
+                hostCorrectionStartB = 0.0;
                 hostCorrectionSamplesRemaining = 0;
             }
             else
@@ -219,7 +233,8 @@ namespace dnaorbit::dsp
 
                 if (discontinuity > tolerance)
                 {
-                    hostCorrectionStart = orbitmath::shortestAngleDelta (hostBlockPhase, thetaA);
+                    hostCorrectionStartA = orbitmath::shortestAngleDelta (hostBlockPhase, thetaA);
+                    hostCorrectionStartB = orbitmath::shortestAngleDelta (hostBlockPhaseB, thetaB);
                     hostCorrectionSamplesRemaining = hostCorrectionSamplesTotal;
                 }
             }
@@ -271,24 +286,19 @@ namespace dnaorbit::dsp
             const float dryR = sampleInR;
 
             const double incA = orbitmath::angularIncrement ((double) rateHz, sampleRate);
+            double hostCorrectionFraction = 0.0;
 
             if (useHostLock)
             {
-                const double nominal = orbitmath::wrapTwoPi (
+                const double nominalA = orbitmath::wrapTwoPi (
                     hostBlockPhase + directionSign * hostIncrement * (double) n);
 
                 if (hostCorrectionSamplesRemaining > 0)
-                {
-                    const double fraction = (double) hostCorrectionSamplesRemaining
-                                          / (double) hostCorrectionSamplesTotal;
-                    thetaA = orbitmath::wrapTwoPi (nominal + hostCorrectionStart * fraction);
-                    --hostCorrectionSamplesRemaining;
-                }
-                else
-                {
-                    thetaA = nominal;
-                }
+                    hostCorrectionFraction = (double) hostCorrectionSamplesRemaining
+                                           / (double) hostCorrectionSamplesTotal;
 
+                thetaA = orbitmath::wrapTwoPi (
+                    nominalA + hostCorrectionStartA * hostCorrectionFraction);
                 phaseAccumA = positiveFmod (
                     hostRawStart + directionSign * hostIncrement * (double) n,
                     phaseModulus);
@@ -305,7 +315,25 @@ namespace dnaorbit::dsp
 
             const bool wantsLocked = symmetry >= (float) symmetryLockThreshold;
 
-            if (wantsLocked)
+            if (useHostLock)
+            {
+                const double diff = orbitmath::rateDifferenceFactor ((double) symmetry,
+                                                                      maxRateDifference);
+                const double bScale = wantsLocked ? 1.0 : 1.0 + diff;
+                const double nominalB = orbitmath::wrapTwoPi (
+                    startRadians + orbitmath::pi
+                    + directionSign * orbitmath::twoPi * hostPpqCycles * bScale
+                    + directionSign * hostIncrement * bScale * (double) n);
+
+                thetaB = orbitmath::wrapTwoPi (
+                    nominalB + hostCorrectionStartB * hostCorrectionFraction);
+                symmetryLocked = wantsLocked;
+                resyncSamplesRemaining = 0;
+
+                if (hostCorrectionSamplesRemaining > 0)
+                    --hostCorrectionSamplesRemaining;
+            }
+            else if (wantsLocked)
             {
                 const double desired = orbitmath::wrapTwoPi (thetaA + orbitmath::pi);
 
@@ -460,9 +488,6 @@ namespace dnaorbit::dsp
             wetL *= wetMakeup;
             wetR *= wetMakeup;
 
-            // Low frequencies are reintroduced as a stable mono anchor after
-            // the moving high-band compensation. The high-band Side bed keeps
-            // width without allowing sub/bass energy to orbit unpredictably.
             wetL += lowMid;
             wetR += lowMid;
             const float sideBed = side * stereoPreserve;
