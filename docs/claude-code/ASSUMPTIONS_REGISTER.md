@@ -1,6 +1,6 @@
 # Assumptions Register
 
-This register prevents undocumented assumptions from becoming product facts. Update it when implementation, evidence, or product scope changes.
+This register prevents undocumented assumptions from becoming product facts. Update it when implementation, evidence, governance, or product scope changes.
 
 ## Status values
 
@@ -29,6 +29,11 @@ This register prevents undocumented assumptions from becoming product facts. Upd
 | A-013 | Local validation is the primary automated workflow because GitHub Actions is not enabled. | WORKFLOW FACT | Accepted | Project constraint | Local environment may drift or results may not be shared | Preserve logs/tool versions; consider CI later |
 | A-014 | Float audio with double phase/time state can meet current quality goals when measured. | NUMERICAL APPROXIMATION | Provisional | Current architecture | Long renders, high-rate modulation, platform differences | Long-duration drift, duplicate render and high-frequency error tests |
 | A-015 | The 3D view can truthfully represent low-rate DSP telemetry when clearly treated as a sampled visualization. | NUMERICAL UI MODEL | Provisional | Current telemetry design | UI polling/smoothing is not sample accurate; seeks may create history artifacts | Visual timeline tests and real-host loop/seek inspection |
+| A-016 | Product Constitution 1.0.0 accurately captures the product owner’s durable intent. | PRODUCT GOVERNANCE | Provisional | User explicitly requested durable quality governance; wording authored in draft | Nuance may be incomplete or overly restrictive; agents cannot infer approval | Product-owner review and explicit approval/revision of the exact constitution version/hash |
+| A-017 | Path-based R0–R4 classification and coverage checks materially reduce stale-record and ungoverned-change risk. | PROCESS / EXACT AUTOMATION | Provisional | Machine policy and auditor design | Semantic drift can occur inside low-risk paths; repository structure can outgrow patterns | Run intentional positive/negative tests and review risk patterns each release |
+| A-018 | Change records and independent reviews improve decisions rather than becoming mechanical paperwork. | PROCESS / HUMAN FACTOR | Unknown | Governance design only | Records may be copied, stale, or optimized for passing the gate | Observe several real future changes; simplify or strengthen based on failures |
+| A-019 | Standard Python 3 and Git are available and sufficiently stable for local governance audit. | TOOLCHAIN POLICY | Provisional | Intended development Mac workflow | Missing/old Python, Git edge cases, unusual branch topology | Run self-test/audit on macOS and any supported developer platforms |
+| A-020 | A passing structural governance audit can be clearly distinguished from owner, listening, UI, host, legal, and release approval. | COMMUNICATION / PROCESS | Provisional | Separate completion vocabulary and release log | Users/agents may still interpret PASS as product approval | Review actual reports and PR summaries; correct misleading wording immediately |
 
 ## New assumption template
 
@@ -59,4 +64,8 @@ Review affected assumptions when:
 - listening contradicts measurements;
 - a test tolerance changes;
 - optimization changes numerical behavior;
-- a new rendering topology or physical mode is proposed.
+- a new rendering topology or physical mode is proposed;
+- scope expands beyond a change record;
+- constitution/governance wording or risk patterns change;
+- an exception is activated, expires, repeats, or becomes debt;
+- a governance gate passes mechanically while reviewers believe the product direction is wrong.
