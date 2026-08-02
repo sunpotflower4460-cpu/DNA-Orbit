@@ -1,14 +1,40 @@
 # Manual verification required
 
-This file lists checks still required before the commercial-upgrade branch can
-be merged or shipped.
+This file lists checks still required before the commercial-upgrade branch can be merged or shipped.
 
-The current ChatGPT environment edited GitHub through the connector but could
-not download and compile the complete branch. Therefore the newest centred
-Stereo Preserve, Soft Bypass, correlation-aware Mix, Bass Anchor, Character,
-Host Phase Lock, and user-centred editor changes are **not marked validated**
-here. Source review and screenshot definitions do not prove compiled layout,
-usability, accessibility, audio quality, or host behaviour.
+The current ChatGPT environment edited GitHub through the connector but could not download and compile the complete branch. Therefore the newest centred Stereo Preserve, Soft Bypass, correlation-aware Mix, Bass Anchor, Character, Host Phase Lock, user-centred editor, and quality-governance changes are **not marked validated** here. Source review, policy files, and screenshot definitions do not prove compiled layout, usability, accessibility, audio quality, host behaviour, or governance execution.
+
+## 0. Constitution and quality governance
+
+Before ordinary validation:
+
+```sh
+git fetch origin
+git checkout agent/world-class-dsp-phase3
+bash scripts/agent-preflight.sh
+bash scripts/quality-gate.sh
+```
+
+Confirm:
+
+- `docs/governance/PRODUCT_CONSTITUTION.md` matches the SHA-256 lock;
+- every R2+ changed path is covered by a changed change record;
+- declared change-record risk is not lower than covered path risk;
+- R3/R4 changes have relevant ADRs and independent review records;
+- no active exception is expired or outside its written scope;
+- no Blocker debt exists and no High debt is inside shipping scope;
+- the current change records reflect actual scope rather than mechanically reusing stale records;
+- the Product Constitution 1.0.0 wording has explicit product-owner approval before release-mode acceptance.
+
+Before release authorisation run:
+
+```sh
+bash scripts/quality-gate.sh --release
+```
+
+Release mode must fail until required owner approval and exception approvals are recorded. A passing governance audit proves structural consistency only; it does not replace listening, UI, host, legal, signing, or product-owner judgment.
+
+Record the final release decision separately in `docs/quality/RELEASE_DECISION_LOG.md`, including exact commit and artifact hashes. Merge, tag, or successful build is not release approval.
 
 ## 1. Mandatory local build
 
@@ -20,8 +46,7 @@ git checkout agent/world-class-dsp-phase3
 bash scripts/validate-local.sh
 ```
 
-It runs preflight, static real-time audit, Release configure/build, CTest,
-screenshot generation, ASan/UBSan where supported, and the DSP benchmark.
+It runs preflight, development governance audit, static real-time audit, Release configure/build, CTest, screenshot generation, ASan/UBSan where supported, and the DSP benchmark.
 
 Manual alternatives:
 
@@ -49,9 +74,7 @@ cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-Keep the PR in draft if compilation or any test fails. Do not weaken test
-thresholds merely to make the branch green; determine whether the code or test
-assumption is wrong.
+Keep the PR in draft if governance, compilation, or any test fails. Do not weaken rules or test thresholds merely to make the branch green; determine whether the implementation, test assumption, change contract, or policy is wrong.
 
 ## 2. Sanitizers
 
@@ -81,21 +104,16 @@ Measure Bass Anchor at Off/80/120/180/250 Hz using mono and stereo material.
 
 Automated expectations to confirm after build:
 
-- fourth-order Linkwitz–Riley low + high recombination remains within test
-  tolerance at 60/120/1000/5000 Hz;
+- fourth-order Linkwitz–Riley low + high recombination remains within test tolerance at 60/120/1000/5000 Hz;
 - `20 Hz / Off` is sample-transparent (`low = 0`, `high = input`);
-- anti-phase 60 Hz energy is strongly removed from the high-band Side bed at a
-  120 Hz anchor;
+- anti-phase 60 Hz energy is strongly removed from the high-band Side bed at a 120 Hz anchor;
 - 1 kHz Side remains substantially unchanged.
 
-Audition kick, bass, drum loop, stereo piano, wide pad, full mix, mono vocal,
-and acoustic guitar. Confirm low-end solidity, crossover transparency,
-click-free automation, default suitability, and understood NULL CORE behaviour.
+Audition kick, bass, drum loop, stereo piano, wide pad, full mix, mono vocal, and acoustic guitar. Confirm low-end solidity, crossover transparency, click-free automation, default suitability, and understood NULL CORE behaviour.
 
 ## 5. Character tuning
 
-Compare Natural, Vivid, and Deep at equal loudness on vocal, guitar, synth,
-pad, drums, and full mix.
+Compare Natural, Vivid, and Deep at equal loudness on vocal, guitar, synth, pad, drums, and full mix.
 
 Current engineering values:
 
@@ -103,50 +121,35 @@ Current engineering values:
 - Vivid: 6 dB, 8 kHz, 10 ms;
 - Deep: 8 dB, 3.5 kHz, 14 ms.
 
-Confirm distinct musical purpose, no loudness bias, no unacceptable harshness,
-dullness, pitch wobble, click, or preset mismatch. Retune only from recorded
-level-matched evidence.
+Confirm distinct musical purpose, no loudness bias, no unacceptable harshness, dullness, pitch wobble, click, or preset mismatch. Retune only from recorded level-matched evidence.
 
 ## 6. Host Phase Lock and transport
 
-Test Free, Retrigger, and Host Lock in Cubase or LUNA first, then other
-available DAWs.
+Test Free, Retrigger, and Host Lock in Cubase or LUNA first, then other available DAWs.
 
 Time signatures: 3/4, 4/4, 5/4, 6/8, and 7/8.
 
-Test multiple start positions, stop/restart, loops, forward/backward seeks,
-tempo/time-signature changes, Division, Start Phase, Direction, repeated
-offline renders, and realtime/offline comparison.
+Test multiple start positions, stop/restart, loops, forward/backward seeks, tempo/time-signature changes, Division, Start Phase, Direction, repeated offline renders, and realtime/offline comparison.
 
-Confirm deterministic PPQ geometry, correct bar length, correct Retrigger and
-Free behaviour, no hard seek click, acceptable 30 ms correction, safe fallback
-when host data is absent, and truthful visual history.
+Confirm deterministic PPQ geometry, correct bar length, correct Retrigger and Free behaviour, no hard seek click, acceptable 30 ms correction, safe fallback when host data is absent, and truthful visual history.
 
 ## 7. Centred Stereo Preserve listening
 
-Listen at 0/25/50/70/100% using mono vocal, L-only, R-only, unequal L/R,
-wide pad, uncorrelated texture, anti-phase stress, guitar, piano, and full mix.
+Listen at 0/25/50/70/100% using mono vocal, L-only, R-only, unequal L/R, wide pad, uncorrelated texture, anti-phase stress, guitar, piano, and full mix.
 
-Confirm audible moving helix, preserved width without masking motion,
-anti-phase survival above 0%, unchanged mono behaviour, and evidence-based
-factory/preset values.
+Confirm audible moving helix, preserved width without masking motion, anti-phase survival above 0%, unchanged mono behaviour, and evidence-based factory/preset values.
 
 ## 8. Soft Bypass listening
 
-Automate and toggle Soft Bypass on vocal, sustained pad, drums, bass-heavy
-material, and full mix.
+Automate and toggle Soft Bypass on vocal, sustained pad, drums, bass-heavy material, and full mix.
 
-Confirm no click or gain flare, exact Dry endpoint, no Output-trim leak at the
-endpoint, continuing orbit state, and non-stale return.
+Confirm no click or gain flare, exact Dry endpoint, no Output-trim leak at the endpoint, continuing orbit state, and non-stale return.
 
 ## 9. Correlation-aware Mix and Auto Gain
 
-Sweep Mix 0→100→0 with Auto Gain on/off using correlated, transient, wide,
-anti-phase, NULL CORE, and full-mix material.
+Sweep Mix 0→100→0 with Auto Gain on/off using correlated, transient, wide, anti-phase, NULL CORE, and full-mix material.
 
-Record RMS/loudness, peak, 25/50/75% levels, transient behaviour, post-silence
-response, and mono fold-down. Confirm the 250 ms correction is stable and does
-not sound like a loudness rider.
+Record RMS/loudness, peak, 25/50/75% levels, transient behaviour, post-silence response, and mono fold-down. Confirm the 250 ms correction is stable and does not sound like a loudness rider.
 
 ## 10. Real DAW verification
 
@@ -213,15 +216,13 @@ Blockers:
 - minimum-size visualiser loses all explanatory value;
 - active, disabled, modified, warning, and bypass states cannot be distinguished.
 
-Screenshots validate layout only. They do not prove keyboard access, host
-scaling, usability, or visualiser performance.
+Screenshots validate layout only. They do not prove keyboard access, host scaling, usability, or visualiser performance.
 
 ## 12. UI interaction and accessibility
 
 ### Primary first-use journey
 
-Give the plug-in to a target musician who has not seen the implementation.
-Without coaching, ask them to:
+Give the plug-in to a target musician who has not seen the implementation. Without coaching, ask them to:
 
 1. identify what the plug-in does;
 2. choose a suitable preset;
@@ -231,9 +232,7 @@ Without coaching, ask them to:
 6. modify a preset and return to its original state;
 7. find advanced motion, space, and output controls.
 
-Record hesitation, wrong clicks, misunderstood labels, hidden dependencies,
-and whether the result can be reached without opening Detail unnecessarily.
-Do not explain the interface until the observation is complete.
+Record hesitation, wrong clicks, misunderstood labels, hidden dependencies, and whether the result can be reached without opening Detail unnecessarily. Do not explain the interface until the observation is complete.
 
 ### Keyboard and focus
 
@@ -247,8 +246,7 @@ Manually verify:
 - popup menus and tooltips do not trap focus;
 - double-click reset returns each continuous control to the actual parameter default.
 
-Keyboard-focus eligibility in source code is not proof that traversal order is
-usable. Record the observed order and any host-specific difference.
+Keyboard-focus eligibility in source code is not proof that traversal order is usable. Record the observed order and any host-specific difference.
 
 ### States and wording
 
@@ -266,19 +264,13 @@ Confirm:
 
 ### DPI, scaling, and resizing
 
-Test minimum, standard, wide, and maximum sizes at available 100%, 125%, 150%,
-175%, and 200% display scaling. Repeatedly drag through the 1120 px responsive
-breakpoint.
+Test minimum, standard, wide, and maximum sizes at available 100%, 125%, 150%, 175%, and 200% display scaling. Repeatedly drag through the 1120 px responsive breakpoint.
 
-Confirm no flicker, stale card bounds, cropped popup, incorrect font fallback,
-unusable resize handle, tooltip outside the visible area, or sustained message-
-thread spike.
+Confirm no flicker, stale card bounds, cropped popup, incorrect font fallback, unusable resize handle, tooltip outside the visible area, or sustained message-thread spike.
 
 ### Colour and non-colour cues
 
-Verify active, disabled, modified, drift, NULL CORE, and Bypass states in normal
-colour, reduced-saturation display, and a grayscale screenshot. No critical
-state may depend on colour alone.
+Verify active, disabled, modified, drift, NULL CORE, and Bypass states in normal colour, reduced-saturation display, and a grayscale screenshot. No critical state may depend on colour alone.
 
 ## 13. Visualiser truth and performance
 
@@ -293,9 +285,7 @@ Confirm:
 - large-window rendering does not compromise audio-thread performance;
 - Basic remains visually calm enough for musical decisions.
 
-Measure editor closed/open at 44.1/48/96/192 kHz, block sizes 32/64/128/512,
-and 1/5/10/20 instances. Record average/peak CPU, callback time, editor frame
-time, memory, load time, and automation/Host Lock spikes.
+Measure editor closed/open at 44.1/48/96/192 kHz, block sizes 32/64/128/512, and 1/5/10/20 instances. Record average/peak CPU, callback time, editor frame time, memory, load time, and automation/Host Lock spikes.
 
 ## 14. Signing and distribution
 
@@ -316,12 +306,12 @@ time, memory, load time, and automation/Host Lock spikes.
 
 ## 15. CI decision
 
-Per the user's decision, no GitHub Actions workflow has been added. Checks are
-currently local. The sanitizer CMake option can be connected to CI later
-without changing DSP code.
+Per the user's decision, no GitHub Actions workflow has been added. Checks are currently local. The sanitizer CMake option can be connected to CI later without changing DSP code.
 
 ## 16. Remaining product work
 
+- local development governance audit and resolution of findings;
+- product-owner review of Product Constitution 1.0.0;
 - compile/regression fixes from the first complete local build;
 - render and inspect the complete eight-state UI matrix;
 - correct issues found by keyboard, DPI, DAW, and first-use observation;
@@ -329,6 +319,7 @@ without changing DSP code.
 - final Character, Stereo Preserve, Bass Anchor, and preset tuning;
 - transport-jump visual-history verification/improvement;
 - English localisation beyond intentional technical labels;
+- release-mode governance audit and explicit release decision;
 - installer/signing workflow;
 - complete real-DAW release matrix.
 
