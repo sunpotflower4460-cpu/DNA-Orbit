@@ -14,6 +14,7 @@ It is designed to maximize results without loading every long procedure into eve
 | Deep standards | `docs/claude-code/*.md` | Read on demand | Detailed reasoning and reference material |
 | Deterministic scripts | `scripts/*.sh` | Explicitly run | Repository state, static audit, build/test/benchmark |
 | ADRs | `docs/commercial-upgrade/decisions/` | Relevant decision work | Historical rationale and compatibility decisions |
+| Experiment records | `docs/experiments/` | One record per decision | Reproducible measurements/listening and adopted/rejected results |
 | Manual gates | `MANUAL_REQUIRED.md` | Before review/release | Listening, DAW, signing, installer and legal work |
 
 ## First session check
@@ -21,6 +22,7 @@ It is designed to maximize results without loading every long procedure into eve
 From the repository root:
 
 ```sh
+bash scripts/agent-preflight.sh
 claude
 ```
 
@@ -43,17 +45,35 @@ for substantial DSP work.
 ## Recommended workflow
 
 1. `/start-dsp-task` — establish baseline, truth class, equations, invariants, compatibility, and evidence plan.
-2. Implement a small coherent change with tests.
-3. `/physics-audit` — verify physical and numerical validity.
-4. `/audio-quality-gate` — verify exact contracts, measurements, listening, and CPU tradeoffs.
-5. `/adversarial-review` — attack the implementation from independent lenses.
-6. `/release-gate` — determine the actual completion state.
+2. `/research-primary-sources` — use when APIs, physical claims, standards, validators, or numerical methods are uncertain/version-sensitive.
+3. Implement a small coherent change with tests.
+4. `/physics-audit` — verify physical and numerical validity.
+5. `/audio-quality-gate` — verify exact contracts, measurements, listening, and CPU tradeoffs.
+6. `/adversarial-review` — attack the implementation from independent lenses.
+7. `/release-gate` — determine the actual completion state.
 
-For competing algorithms or subjective tuning, use:
+For competing algorithms or subjective tuning:
 
 ```text
 /experiment-design <hypothesis or alternatives>
 ```
+
+For measured performance work:
+
+```text
+/optimize-dsp-safely <hotspot or target>
+```
+
+## Project skills
+
+- `start-dsp-task` — rigorous task kickoff and baseline.
+- `research-primary-sources` — current primary-source research and assumption capture.
+- `physics-audit` — model, units, assumptions, numerical and physical validity.
+- `audio-quality-gate` — exact contracts, measurement, level-matched listening and CPU tradeoffs.
+- `experiment-design` — preregister and record reproducible algorithm/listening experiments.
+- `optimize-dsp-safely` — profiler-led optimization with sound-preservation evidence.
+- `adversarial-review` — severity-ranked hostile review.
+- `release-gate` — honest completion and commercial release status.
 
 ## Specialist subagents
 
@@ -66,8 +86,10 @@ The implementation agent should not treat these reviewers as approval machines. 
 
 ## Deep standards
 
+- `CURRENT_ARCHITECTURE_MAP.md` — current code responsibilities, signal flow and high-risk zones.
 - `DEVELOPMENT_OPERATING_SYSTEM.md` — complete lifecycle and decision process.
 - `PHYSICS_FIDELITY_STANDARD.md` — model hierarchy, equations, units and physical honesty.
+- `PHYSICAL_AUDIO_ROADMAP.md` — staged route from current psychoacoustic product to defensible physical/hybrid modes.
 - `AUDIO_QUALITY_STANDARD.md` — signal quality, stereo, automation, measurement and listening.
 - `EXPERIMENT_AND_VALIDATION_PROTOCOL.md` — reproducible experiments and error budgets.
 - `QUALITY_SCORECARD.md` — go/no-go scoring without averaging away blockers.
@@ -86,6 +108,8 @@ When Claude makes the same class of mistake twice, add the correction at the low
 - repeatable specialist review → subagent;
 - deep explanation → this directory;
 - deterministic enforcement → script or hook;
-- product decision → ADR.
+- product decision → ADR;
+- measurement/listening result → experiment record;
+- uncertain premise → assumptions register.
 
 Keep `CLAUDE.md` short. Long always-loaded instructions reduce adherence and consume the context needed for actual engineering.
