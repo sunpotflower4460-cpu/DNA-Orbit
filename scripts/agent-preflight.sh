@@ -36,11 +36,23 @@ REQUIRED_FILES=(
   ".claude/settings.json"
   ".claude/rules/dsp-physics.md"
   ".claude/rules/audio-quality.md"
+  ".claude/skills/quality-governance/SKILL.md"
   ".claude/skills/start-dsp-task/SKILL.md"
   ".claude/skills/physics-audit/SKILL.md"
   ".claude/skills/audio-quality-gate/SKILL.md"
   ".claude/skills/adversarial-review/SKILL.md"
   ".claude/skills/release-gate/SKILL.md"
+  ".claude/agents/quality-governor.md"
+  "docs/governance/PRODUCT_CONSTITUTION.md"
+  "docs/governance/QUALITY_GOVERNANCE_SYSTEM.md"
+  "docs/governance/CHANGE_RISK_MODEL.md"
+  "docs/governance/DECISION_AND_EXCEPTION_POLICY.md"
+  "quality/governance.json"
+  "quality/constitution.sha256"
+  "docs/quality/QUALITY_DEBT_LEDGER.md"
+  "docs/quality/RELEASE_DECISION_LOG.md"
+  "scripts/quality-governance-audit.py"
+  "scripts/quality-gate.sh"
   "docs/claude-code/README.md"
   "docs/claude-code/PHYSICS_FIDELITY_STANDARD.md"
   "docs/claude-code/AUDIO_QUALITY_STANDARD.md"
@@ -59,8 +71,20 @@ for path in "${REQUIRED_FILES[@]}"; do
   fi
 done
 
+printf '\n-- Constitution --\n'
+if command -v shasum >/dev/null 2>&1; then
+  shasum -a 256 docs/governance/PRODUCT_CONSTITUTION.md
+elif command -v sha256sum >/dev/null 2>&1; then
+  sha256sum docs/governance/PRODUCT_CONSTITUTION.md
+else
+  printf 'No shell SHA-256 tool found; Python governance audit will verify integrity.\n'
+fi
+printf 'Expected lock: '
+cat quality/constitution.sha256 2>/dev/null || true
+
 printf '\n-- Tool versions --\n'
 printf 'git:    %s\n' "$(git --version 2>/dev/null || echo unavailable)"
+printf 'python: %s\n' "$(python3 --version 2>/dev/null || echo unavailable)"
 printf 'cmake:  %s\n' "$(cmake --version 2>/dev/null | head -n 1 || echo unavailable)"
 printf 'c++:    %s\n' "$(c++ --version 2>/dev/null | head -n 1 || echo unavailable)"
 printf 'claude: %s\n' "$(claude --version 2>/dev/null | head -n 1 || echo unavailable)"
@@ -73,8 +97,9 @@ if command -v gh >/dev/null 2>&1; then
 fi
 
 if [[ "$MISSING" -ne 0 ]]; then
-  printf '\nERROR: required agent foundation files are missing.\n' >&2
+  printf '\nERROR: required engineering/governance foundation files are missing.\n' >&2
   exit 1
 fi
 
-printf '\nPreflight complete. This is orientation, not build/test evidence.\n'
+printf '\nPreflight complete. This is orientation, not governance/build/test evidence.\n'
+printf 'Next: bash scripts/quality-gate.sh\n'
