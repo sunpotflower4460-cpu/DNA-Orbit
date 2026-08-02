@@ -1,137 +1,220 @@
 # Manual verification required
 
-This file lists everything the commercial-upgrade package
-(`docs/commercial-upgrade/`) asks for that **cannot be executed or verified
-automatically in this development environment** (a Linux container with no
-audio device, no macOS/Windows, no real DAW, no Apple developer certificate,
-and no installed `pluginval`/VST3 Validator/`auval`). Nothing in this file
-has been run. Where a section below is not listed, it means the corresponding
-package requirement either doesn't apply or has been automated already (see
-`docs/commercial-upgrade/00_README_使い方.md` for the source spec and the git
-log for what has actually been done).
+This file lists checks that are still required before the commercial-upgrade
+branch can be merged or shipped.
 
-Per the package's own rule ("実行していないビルド・試聴・DAW確認を確認済みと
-書かない" — never mark unexecuted verification as done), everything here is
-listed as **not done**, with the exact command or setup needed to do it.
+The current ChatGPT environment could edit the GitHub repository through the
+GitHub connector, but it could not clone the repository or execute CMake,
+JUCE, CTest, plugin validators or a DAW. Therefore the newest centred Stereo
+Preserve and Soft Bypass changes have **not been compiled or executed in this
+environment**. Older commits contain reported Linux test results, but those do
+not validate the new branch changes.
 
-## Other platforms
+Do not mark any item below complete without recording the machine, OS, command
+and result.
 
-- **macOS build** (Standalone/VST3/AU, Apple Silicon + Intel/Universal):
-  ```sh
-  cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-  cmake --build build --config Release -j
-  ctest --test-dir build --output-on-failure
-  ```
-  Not run here — this environment has no macOS. AU format specifically only
-  builds on macOS at all (`FORMATS Standalone VST3 AU` in `CMakeLists.txt`
-  only produces AU there).
+## 1. Mandatory local build
 
-- **Windows build** (Standalone/VST3, MSVC):
-  ```powershell
-  cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-  cmake --build build --config Release
-  ctest --test-dir build -C Release --output-on-failure
-  ```
-  Not run here. The `M_PI` portability fix (this repo now uses
-  `orbitmath::pi` everywhere instead) was made specifically to reduce risk on
-  this platform, but the actual MSVC compile has not been attempted.
-
-## Validators
-
-- **pluginval** (strictness 10): not installed here; would need to be built
-  or downloaded on a machine with an internet connection and then run against
-  the built VST3/AU/Standalone artifacts, e.g.
-  `pluginval --strictness-level 10 --validate "build/DNAOrbit_artefacts/Release/VST3/DNA Orbit.vst3"`.
-- **Steinberg VST3 Validator**: not installed; run against the built `.vst3`
-  bundle on macOS/Windows.
-- **`auval`**: macOS-only tool; not available here. Once an AU build exists
-  on macOS: `auval -v aufx DnaO FpSt`.
-
-## Real DAW verification
-
-None of Logic Pro, Ableton Live, Cubase, Studio One, REAPER, or FL Studio are
-installed here. The full per-DAW checklist in
-`docs/commercial-upgrade/04_QA_商用リリース仕様書.md` §6 and
-`docs/commercial-upgrade/08_手動試聴_DAW検証仕様書.md` needs a human with
-those DAWs installed. This includes: scan, load, editor resize, presets,
-save/reopen project, automation, tempo change, loop, bypass, offline bounce,
-freeze, mono/stereo track routing, multiple instances, remove/reinsert.
-
-## Manual listening
-
-`docs/commercial-upgrade/08_手動試聴_DAW検証仕様書.md` requires actual
-listening (headphones, stereo speakers, mono fold-down, various source
-material) to judge musical/perceptual quality — comb-filtering character,
-whether fast Motion is nauseating, whether Bass Anchor's crossover sounds
-seamless, whether Character presets feel distinct, whether Stereo Preserve's
-default (70%, see the Phase 2 commit for the reasoning) sounds right across
-real vocal/pad/guitar material. Nothing here substitutes automated DSP tests
-(which do run, and do check the numeric claims — e.g. anti-phase no longer
-silencing Wet, Mix-sweep RMS deviation bounds) for actually listening.
-
-- **Stereo Preserve perceived loudness** (see `docs/commercial-upgrade/decisions/ADR-003-stereo-preserve.md`):
-  Phase 2 added the `stereoPreserve` parameter (default 70% for new
-  instances) so anti-phase and wide stereo input no longer collapse Wet
-  toward silence. The spec's proposed extra loudness-matching normalizer for
-  this specific knob was deliberately NOT implemented (it would have
-  conflicted with the schema-1 byte-identical-legacy requirement at its
-  literal values). If real listening finds moving Stereo Preserve noticeably
-  changes perceived Wet loudness, ADR-003 already has a concrete fallback
-  design (a relative normalizer anchored to 0 dB at 0%) ready to implement
-  as ADR-004.
-
-- **Bypass toggle audibility** (see `docs/commercial-upgrade/decisions/ADR-001-bypass-continuity.md`):
-  Phase 1 fixed the engine's internal state freezing during bypass (orbit
-  phase, filters, and smoothers now keep advancing on a scratch buffer), but
-  deliberately did NOT add a Soft Bypass audio crossfade — that was a
-  documented, reasoned trade-off, not an oversight. If a real DAW listening
-  session finds an audible click/discontinuity when toggling Host Bypass,
-  that is the one thing to specifically check for; ADR-001 already lists the
-  crossfade as the fallback design if this turns out to be needed.
-
-## Signing, notarization, installers
-
-- macOS: Developer ID Application signing, Hardened Runtime, notarization
-  (`notarytool`), stapling, `codesign --verify --deep --strict`,
-  `spctl --assess`. Requires an active Apple Developer Program membership and
-  a macOS machine.
-- Windows: code-signing certificate, `signtool`, installer signing,
-  SmartScreen reputation (builds over time from real-world downloads).
-- Installers: DMG/PKG for macOS, Inno Setup/WiX for Windows — not created.
-
-## CI
-
-Per explicit user decision (this session), **no GitHub Actions workflow has
-been added**, despite the package requesting a Linux/macOS/Windows CI
-matrix. What *has* been added locally, and does run in this environment:
+### macOS / Linux
 
 ```sh
-# Standard build + test:
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release -j
 ctest --test-dir build --output-on-failure
+```
 
-# Sanitizer build (ASan+UBSan), Debug config, GCC/Clang only:
-cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug -DDNA_ORBIT_SANITIZERS="address,undefined"
+### Windows
+
+```powershell
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
+```
+
+The draft PR must remain draft if either build fails or any CTest assertion
+fails.
+
+## 2. Sanitizers
+
+On GCC or Clang:
+
+```sh
+cmake -S . -B build-asan \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DDNA_ORBIT_SANITIZERS="address,undefined"
 cmake --build build-asan -j
 ctest --test-dir build-asan --output-on-failure
 ```
 
-If GitHub Actions (or another CI provider) is wanted later, the sanitizer
-option above (`DNA_ORBIT_SANITIZERS`) is already structured to drop straight
-into a workflow matrix step without further CMake changes.
+Expected result: no project memory error, undefined behaviour or leak.
 
-## clang-tidy / warnings-as-errors
+## 3. Validators
 
-Not run. `juce::juce_recommended_warning_flags` is linked (enables a broad
-warning set), but no `-Werror`/`/WX` configuration or `clang-tidy` pass has
-been added or executed.
+- pluginval strictness 10 against the built VST3 and AU where applicable.
+- Steinberg VST3 Validator on macOS and Windows.
+- macOS AU validation:
 
-## Screenshot / audio regression artifacts
+```sh
+auval -v aufx DnaO FpSt
+```
 
-`Tools/RenderShots.cpp` (build with `-DDNA_ORBIT_BUILD_TOOLS=ON`) can
-regenerate current-state screenshots on demand for manual before/after
-comparison; PNGs are not committed to the repository to avoid binary bloat,
-so there is no automated pixel-diff regression gate — only the numeric
-`Tests/BaselineRegressionTests.cpp` fingerprints (RMS/peak/checksum of fixed
-signals) serve as the audio regression baseline described in the QA spec §8.
+## 4. Centred Stereo Preserve listening
+
+The current design is documented in
+`docs/commercial-upgrade/decisions/ADR-004-centered-stereo-preserve.md`.
+
+The moving DNA strands and Core receive Mid. Stereo Preserve restores a
+stationary Side bed after geometry Auto Gain. The 70% fresh-instance default
+is a candidate, not a final perceptual truth.
+
+Listen at 0/25/50/70/100% using:
+
+- mono vocal;
+- female and male lead vocal;
+- L-only and R-only material;
+- stereo input with approximately 6 dB L/R imbalance;
+- wide pad;
+- uncorrelated stereo noise or texture;
+- anti-phase stress signal;
+- acoustic guitar;
+- piano;
+- full mix.
+
+Confirm:
+
+- the moving helix remains perceptible;
+- the stable Side bed does not mask the DNA motion;
+- L/R-unbalanced material does not make the moving orbit lean unnaturally;
+- anti-phase material remains audible above 0%;
+- mono input does not change when Preserve moves;
+- mono fold-down remains musically useful in HELIX mode;
+- the most musical factory value is recorded and presets are retuned if 70%
+  is not universally appropriate.
+
+## 5. Soft Bypass listening
+
+Soft Bypass is now implemented and documented in
+`docs/commercial-upgrade/decisions/ADR-005-soft-bypass.md`.
+
+Automate or toggle it on:
+
+- vocal;
+- sustained pad;
+- transient drum loop;
+- bass-heavy material;
+- full mix.
+
+Confirm:
+
+- no click;
+- no temporary gain flare;
+- endpoint is exact Dry;
+- Output trim does not affect fully bypassed audio;
+- the orbit continues while bypassed;
+- returning from bypass resumes the current orbit, not a stale one.
+
+Compare Soft Bypass with the DAW's host bypass. Host bypass may be immediate;
+Soft Bypass is the preferred musical A/B control.
+
+## 6. Main Mix and Auto Gain
+
+The main Dry/Wet law is still equal-power. Correlated Dry and Wet may produce
+a mid-Mix gain bump. Test Mix 0→100→0 with Auto Gain on and off using mono,
+stereo, transient and anti-phase material.
+
+Record:
+
+- integrated or long-window RMS/loudness;
+- peak level;
+- audible pumping;
+- level at 25/50/75%;
+- mono fold-down.
+
+Correlation-aware Mix normalisation remains a planned commercial-quality
+improvement and must be completed or explicitly accepted before shipping.
+
+## 7. Real DAW verification
+
+Required DAWs where available:
+
+- Cubase;
+- Logic Pro;
+- Ableton Live;
+- REAPER;
+- Studio One;
+- FL Studio.
+
+For each:
+
+1. scan and load;
+2. open and resize editor;
+3. use every factory preset;
+4. automate every parameter, including Stereo Preserve and Soft Bypass;
+5. save, close and reopen project;
+6. change tempo and loop;
+7. test host bypass and Soft Bypass;
+8. render or bounce offline;
+9. test mono-in/stereo-out and stereo-in/stereo-out;
+10. open multiple instances and check CPU;
+11. remove and reinsert;
+12. confirm no state loss or crash.
+
+## 8. Headless screenshots
+
+```sh
+cmake -S . -B build-shots \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DDNA_ORBIT_BUILD_TOOLS=ON
+cmake --build build-shots --config Release -j --target DNAOrbitRenderShots
+./build-shots/DNAOrbitRenderShots <output-directory>
+```
+
+Inspect Basic, Detail, NULL CORE, drift and modified-preset states. Confirm the
+new Soft Bypass row fits at minimum and maximum editor sizes.
+
+## 9. Performance
+
+Measure with editor closed and open at 44.1/48/96/192 kHz, several block
+sizes and 1/5/10 instances.
+
+Pay particular attention to the existing per-sample trigonometry and
+exponential coefficient calculations. Control-rate optimisation and Bass
+Anchor are not yet implemented on this branch.
+
+## 10. Signing and distribution
+
+### macOS
+
+- Developer ID signing;
+- Hardened Runtime;
+- notarisation with `notarytool`;
+- staple;
+- `codesign --verify --deep --strict`;
+- `spctl --assess`.
+
+### Windows
+
+- code-signing certificate;
+- timestamped installer signing;
+- SmartScreen check;
+- standard VST3 install path;
+- uninstall and upgrade-install test.
+
+## 11. CI decision
+
+Per the user's explicit decision, no GitHub Actions workflow has been added.
+All checks must currently be run locally. The existing CMake sanitizer option
+can be connected to CI later without changing the DSP.
+
+## 12. Remaining product work
+
+Not implemented yet:
+
+- Bass Anchor crossover;
+- PPQ-position Host Phase Lock and non-4/4 bar handling;
+- correlation-aware main Mix normalisation;
+- Character modes;
+- English localisation and accessibility pass;
+- full installer/signing workflow.
+
+These are not hidden limitations; they are release-planning items.
