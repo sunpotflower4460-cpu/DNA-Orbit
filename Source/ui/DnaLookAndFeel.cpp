@@ -1,5 +1,7 @@
 #include "DnaLookAndFeel.h"
 
+#include <cmath>
+
 namespace dnaorbit::ui
 {
     DnaLookAndFeel::DnaLookAndFeel()
@@ -85,6 +87,11 @@ namespace dnaorbit::ui
         const float angle = rotaryStartAngle
                           + sliderPosProportional * (rotaryEndAngle - rotaryStartAngle);
         const float enabledAlpha = slider.isEnabled() ? 1.0f : 0.34f;
+        const auto pointAt = [&centre] (float r, float a)
+        {
+            return juce::Point<float> (centre.x + std::sin (a) * r,
+                                       centre.y - std::cos (a) * r);
+        };
 
         juce::ColourGradient shadow (juce::Colours::black.withAlpha (0.44f),
                                      centre.x, centre.y + radius * 0.55f,
@@ -130,14 +137,14 @@ namespace dnaorbit::ui
         {
             const float t = (float) i / 10.0f;
             const float tickAngle = rotaryStartAngle + t * (rotaryEndAngle - rotaryStartAngle);
-            const auto inner = centre.getPointOnCircumference (radius * 0.67f, tickAngle);
-            const auto outer = centre.getPointOnCircumference (radius * 0.73f, tickAngle);
+            const auto inner = pointAt (radius * 0.67f, tickAngle);
+            const auto outer = pointAt (radius * 0.73f, tickAngle);
             g.setColour (mutedTextColour().withAlpha ((i == 0 || i == 10 ? 0.38f : 0.20f)
                                                       * enabledAlpha));
             g.drawLine ({ inner, outer }, 1.0f);
         }
 
-        const auto pointerEnd = centre.getPointOnCircumference (radius * 0.58f, angle);
+        const auto pointerEnd = pointAt (radius * 0.58f, angle);
         g.setColour (strandBColour().withAlpha (0.95f * enabledAlpha));
         g.drawLine ({ centre, pointerEnd }, juce::jmax (2.0f, radius * 0.055f));
         g.fillEllipse (juce::Rectangle<float> (radius * 0.14f, radius * 0.14f)
