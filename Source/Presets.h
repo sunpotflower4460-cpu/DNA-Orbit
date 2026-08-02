@@ -4,33 +4,37 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "Parameters.h"
 
-/**
- * Factory presets define the complete audio state so applying one never
- * depends on values left behind by a previous preset or host automation.
- */
 namespace dnaorbit::presets
 {
     struct Preset
     {
         const char* name;
         float rateHz;
-        bool  sync;
-        int   division;
+        bool sync;
+        int division;
         float radius, depth, symmetry, twist, core;
-        bool  nullCore;
+        bool nullCore;
         float mix;
         float output;
-        bool  autoGain;
+        bool autoGain;
         float stereoPreserve;
-        bool  softBypass;
+        bool softBypass;
+        float bassAnchorHz;
+        int character;
+        int phaseMode;
+        float startPhase;
+        int direction;
     };
 
+    // Bass Anchor and Character stay conservative until real programme-material
+    // listening is complete. Every field is nevertheless explicit so a preset
+    // can never inherit a hidden value from the previous state.
     inline const Preset presets[] = {
-        { "ボーカルを広げる", 0.10f, false, 2,  75.0f, 45.0f, 100.0f, 4.0f, 10.0f, false, 30.0f, 0.0f, true, 70.0f, false },
-        { "パッドを回す",     0.18f, false, 2, 100.0f, 65.0f, 100.0f, 7.0f, 10.0f, false, 45.0f, 0.0f, true, 70.0f, false },
-        { "ギターに揺らぎ",   0.08f, false, 2,  80.0f, 60.0f,  88.0f, 6.0f, 15.0f, false, 40.0f, 0.0f, true, 70.0f, false },
-        { "シンセを速く回す", 0.60f, false, 2,  90.0f, 70.0f, 100.0f, 8.0f,  0.0f, false, 40.0f, 0.0f, true, 70.0f, false },
-        { "実験:中心を消す", 0.04f, false, 2, 100.0f, 50.0f, 100.0f, 8.0f,  0.0f, true,  30.0f, 0.0f, true, 70.0f, false },
+        { "ボーカルを広げる", 0.10f, false, 2,  75.0f, 45.0f, 100.0f, 4.0f, 10.0f, false, 30.0f, 0.0f, true, 70.0f, false, 120.0f, params::characterNatural, params::phaseHostLock, 0.0f, params::clockwise },
+        { "パッドを回す",     0.18f, false, 2, 100.0f, 65.0f, 100.0f, 7.0f, 10.0f, false, 45.0f, 0.0f, true, 70.0f, false, 120.0f, params::characterNatural, params::phaseHostLock, 0.0f, params::clockwise },
+        { "ギターに揺らぎ",   0.08f, false, 2,  80.0f, 60.0f,  88.0f, 6.0f, 15.0f, false, 40.0f, 0.0f, true, 70.0f, false, 120.0f, params::characterNatural, params::phaseHostLock, 0.0f, params::clockwise },
+        { "シンセを速く回す", 0.60f, false, 2,  90.0f, 70.0f, 100.0f, 8.0f,  0.0f, false, 40.0f, 0.0f, true, 70.0f, false, 120.0f, params::characterVivid,   params::phaseHostLock, 0.0f, params::clockwise },
+        { "実験:中心を消す", 0.04f, false, 2, 100.0f, 50.0f, 100.0f, 8.0f,  0.0f, true,  30.0f, 0.0f, true, 70.0f, false, 120.0f, params::characterDeep,    params::phaseHostLock, 0.0f, params::clockwise },
     };
 
     inline constexpr int numPresets = (int) (sizeof (presets) / sizeof (presets[0]));
@@ -57,9 +61,15 @@ namespace dnaorbit::presets
         set (params::autoGainID, preset.autoGain ? 1.0f : 0.0f);
         set (params::stereoPreserveID, preset.stereoPreserve);
         set (params::softBypassID, preset.softBypass ? 1.0f : 0.0f);
+        set (params::bassAnchorID, preset.bassAnchorHz);
+        set (params::characterID, (float) preset.character);
+        set (params::phaseModeID, (float) preset.phaseMode);
+        set (params::startPhaseID, preset.startPhase);
+        set (params::directionID, (float) preset.direction);
     }
 
-    inline bool matchesCurrentState (const juce::AudioProcessorValueTreeState& apvts, const Preset& preset) noexcept
+    inline bool matchesCurrentState (const juce::AudioProcessorValueTreeState& apvts,
+                                     const Preset& preset) noexcept
     {
         auto isClose = [&apvts] (const char* id, float actual, float tolerance = 0.05f)
         {
@@ -85,6 +95,11 @@ namespace dnaorbit::presets
             && isClose (params::outputID, preset.output)
             && isOn (params::autoGainID, preset.autoGain)
             && isClose (params::stereoPreserveID, preset.stereoPreserve)
-            && isOn (params::softBypassID, preset.softBypass);
+            && isOn (params::softBypassID, preset.softBypass)
+            && isClose (params::bassAnchorID, preset.bassAnchorHz, 0.2f)
+            && isClose (params::characterID, (float) preset.character, 0.5f)
+            && isClose (params::phaseModeID, (float) preset.phaseMode, 0.5f)
+            && isClose (params::startPhaseID, preset.startPhase, 0.2f)
+            && isClose (params::directionID, (float) preset.direction, 0.5f);
     }
 }
