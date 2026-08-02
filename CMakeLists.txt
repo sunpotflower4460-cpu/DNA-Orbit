@@ -8,11 +8,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(DNA_ORBIT_BUILD_TESTS "Build the DNA Orbit unit test suite" ON)
 
-# Local sanitizer builds (no CI service is used for this project - see
-# docs/commercial-upgrade/ - so this is the only automated way to run
-# ASan/UBSan). Usage:
-#   cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug -DDNA_ORBIT_SANITIZERS="address,undefined"
-#   cmake --build build-asan -j && ctest --test-dir build-asan --output-on-failure
 set(DNA_ORBIT_SANITIZERS "" CACHE STRING
     "Comma-separated sanitizers to build with, e.g. 'address,undefined' (GCC/Clang only)")
 
@@ -25,25 +20,10 @@ if (NOT DNA_ORBIT_SANITIZERS STREQUAL "")
     endif()
 endif()
 
-# The UI text is Japanese, so the sources are UTF-8. GCC/Clang assume UTF-8
-# already; MSVC needs to be told explicitly for both the source and execution
-# character sets, otherwise the literals are mangled.
 if (MSVC)
     add_compile_options(/utf-8)
 endif()
 
-# ---------------------------------------------------------------------------
-# JUCE acquisition
-#
-# JUCE is fetched via CMake FetchContent and pinned to tag 8.0.15 so that
-# builds are reproducible. If network access is unavailable, clone JUCE
-# manually into a sibling "JUCE" directory next to this CMakeLists.txt (or
-# anywhere) and set -DFETCHCONTENT_SOURCE_DIR_JUCE=<path-to-JUCE-checkout>
-# when configuring, e.g.:
-#
-#   git clone --branch 8.0.15 --depth 1 https://github.com/juce-framework/JUCE.git
-#   cmake -S . -B build -DFETCHCONTENT_SOURCE_DIR_JUCE=$(pwd)/JUCE
-# ---------------------------------------------------------------------------
 include(FetchContent)
 
 FetchContent_Declare(
@@ -67,7 +47,7 @@ juce_add_plugin(DNAOrbit
     NEEDS_MIDI_INPUT            FALSE
     NEEDS_MIDI_OUTPUT           FALSE
     IS_MIDI_EFFECT              FALSE
-    EDITOR_WANTS_KEYBOARD_FOCUS FALSE
+    EDITOR_WANTS_KEYBOARD_FOCUS TRUE
     COPY_PLUGIN_AFTER_BUILD     FALSE
 )
 
@@ -77,10 +57,12 @@ target_sources(DNAOrbit PRIVATE
     Source/PluginEditor.cpp
     Source/PluginEditor.h
     Source/Parameters.h
+    Source/Presets.h
     Source/dsp/HelixEngine.cpp
     Source/dsp/HelixEngine.h
     Source/dsp/OrbitMath.h
     Source/dsp/OnePoleLowPass.h
+    Source/dsp/LinkwitzRileyCrossover.h
     Source/dsp/StereoUtilities.h
     Source/ui/HelixView3D.cpp
     Source/ui/HelixView3D.h
@@ -113,15 +95,9 @@ if (DNA_ORBIT_BUILD_TESTS)
     add_subdirectory(Tests)
 endif()
 
-# Developer tool: renders editor screenshots headlessly by driving the processor
-# directly. Needed because a machine with no audio device never calls
-# processBlock, which leaves the visualiser frozen in the Standalone build.
 option(DNA_ORBIT_BUILD_TOOLS "Build the DNA Orbit screenshot tool" OFF)
 
 if (DNA_ORBIT_BUILD_TOOLS)
-    # Plain executable reusing the plugin's shared code, exactly like the test
-    # target: juce_add_console_app would force JUCE_STANDALONE_APPLICATION=1 and
-    # clash with the plugin's own definition.
     add_executable(DNAOrbitRenderShots Tools/RenderShots.cpp)
     target_include_directories(DNAOrbitRenderShots PRIVATE Source)
     target_compile_definitions(DNAOrbitRenderShots PRIVATE JUCE_MODAL_LOOPS_PERMITTED=1)
