@@ -3,14 +3,6 @@
 
 namespace
 {
-    /**
-     * Every project saved before editor state got its own child node (see
-     * params::uiStateNodeID) has editorPage/editorWidth/editorHeight as flat
-     * properties directly on the root state. Move them into the child node so
-     * an existing user's window size and tab selection still restore
-     * correctly under the new layout, then drop the old root copies so
-     * nothing reads two conflicting sources of truth going forward.
-     */
     void migrateLegacyUiState (juce::ValueTree& root)
     {
         using namespace dnaorbit::params;
@@ -49,19 +41,13 @@ DNAOrbitAudioProcessor::DNAOrbitAudioProcessor()
     outputParam   = apvts.getRawParameterValue (dnaorbit::params::outputID);
     autoGainParam = apvts.getRawParameterValue (dnaorbit::params::autoGainID);
     stereoPreserveParam = apvts.getRawParameterValue (dnaorbit::params::stereoPreserveID);
+    softBypassParam = apvts.getRawParameterValue (dnaorbit::params::softBypassID);
 }
 
 void DNAOrbitAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     engine.prepare (sampleRate, samplesPerBlock, getTotalNumOutputChannels());
     bypassScratchBuffer.setSize (2, samplesPerBlock, false, false, true);
-
-    // Without this, every SmoothedValue starts this session at its default
-    // current value of 0 and only reaches the host's actual settings by
-    // ramping toward them once processBlock() calls setParameters() - so
-    // Output, Mix, and everything else would audibly fade in from silence
-    // over the first smoothing window after every prepareToPlay() (plugin
-    // load, sample-rate or buffer-size change).
     engine.primeParameters (currentParameterSnapshot());
 }
 
@@ -106,7 +92,6 @@ float DNAOrbitAudioProcessor::resolveRateHz() const noexcept
         }
     }
 
-    // Host tempo unavailable: fall back safely to the Free Rate.
     return freeRateHz;
 }
 
@@ -124,6 +109,7 @@ dnaorbit::dsp::HelixEngine::Parameters DNAOrbitAudioProcessor::currentParameterS
     p.outputDb   = outputParam->load();
     p.autoGain   = autoGainParam->load() > 0.5f;
     p.stereoPreserve01 = stereoPreserveParam->load() / 100.0f;
+    p.softBypass = softBypassParam->load() > 0.5f;
     return p;
 }
 
@@ -137,9 +123,7 @@ void DNAOrbitAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     for (int ch = totalNumInputChannels; ch < totalNumOutputChannels; ++ch)
         buffer.clear (ch, 0, buffer.getNumSamples());
 
-    const auto p = currentParameterSnapshot();
-
-    engine.setParameters (p);
+    engine.setParameters (currentParameterSnapshot());
     engine.process (buffer, totalNumInputChannels);
 }
 
@@ -149,19 +133,6 @@ void DNAOrbitAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& buf
     const int totalNumOutputChannels = getTotalNumOutputChannels();
     const int numSamples = buffer.getNumSamples();
 
-    // Keep the engine's internal state (orbit phase, smoothers, filter/delay
-    // state, and the atomics the 3D visualiser reads) advancing while
-    // bypassed, instead of freezing it. Without this, un-bypassing resumes
-    // from a stale phase - a jump the host's own bypass toggle can make
-    // audible - and the helix view appears to simply stop while bypassed.
-    // This runs the real DSP on a scratch copy so the actual output stays an
-    // exact dry passthrough; only bypassScratchBuffer is written here.
-    //
-    // bypassScratchBuffer is sized once in prepareToPlay() and never resized
-    // on the audio thread. If a host ever hands us a block larger than it
-    // negotiated (a contract violation, but hosts do have bugs), skip the
-    // state advance rather than risk an audio-thread allocation - the dry
-    // passthrough below is unaffected either way.
     if (numSamples <= bypassScratchBuffer.getNumSamples())
     {
         for (int ch = 0; ch < 2; ++ch)
@@ -172,9 +143,6 @@ void DNAOrbitAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& buf
         engine.process (scratchView, totalNumInputChannels);
     }
 
-    // For mono-in/stereo-out, duplicate the input so bypass still yields a
-    // sensible stereo signal that matches the input. Stereo-in/stereo-out is
-    // already an untouched pass-through.
     for (int ch = totalNumInputChannels; ch < totalNumOutputChannels; ++ch)
         buffer.copyFrom (ch, 0, buffer, 0, 0, numSamples);
 }
@@ -188,7 +156,7 @@ void DNAOrbitAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto state = apvts.copyState();
     state.setProperty (dnaorbit::params::schemaVersionPropertyID,
-                        dnaorbit::params::currentStateSchemaVersion, nullptr);
+                       dnaorbit::params::currentStateSchemaVersion, nullptr);
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
     copyXmlToBinary (*xml, destData);
 }
@@ -197,34 +165,20 @@ void DNAOrbitAudioProcessor::setStateInformation (const void* data, int sizeInBy
 {
     std::unique_ptr<juce::XmlElement> xmlState (getXmlFromBinary (data, sizeInBytes));
 
-    if (xmlState == nullptr)
+    if (xmlState == nullptr || ! xmlState->hasTagName (apvts.state.getType()))
         return;
 
-    if (! xmlState->hasTagName (apvts.state.getType()))
-        return;
-
-    // A project saved before this property existed has no schemaVersion at
-    // all - that is, by definition, schema 1 (today's format when the
-    // property was introduced), not "whatever the current version is".
-    // Read before replaceState: the source XML is the ground truth for what
-    // was actually saved, not any value already sitting on the live
-    // apvts.state.
     loadedSchemaVersion = xmlState->getIntAttribute (dnaorbit::params::schemaVersionPropertyID,
                                                       dnaorbit::params::legacyUnversionedSchema);
 
     apvts.replaceState (juce::ValueTree::fromXml (*xmlState));
     migrateLegacyUiState (apvts.state);
 
-    // Stereo Preserve did not exist before schema 2: a schema-1 save has no
-    // stereoPreserve PARAM node at all, so APVTS already fell back to the
-    // parameter's declared (current-product) default of 70% via
-    // replaceState() above. Force it to 0% instead so a pre-existing project
-    // reproduces its original sound exactly - see the schema-version doc
-    // comment in Parameters.h and Tests/BaselineRegressionTests.cpp.
     if (loadedSchemaVersion < dnaorbit::params::stereoPreserveIntroducedInSchema)
     {
         if (auto* stereoPreserve = apvts.getParameter (dnaorbit::params::stereoPreserveID))
-            stereoPreserve->setValueNotifyingHost (stereoPreserve->convertTo0to1 (dnaorbit::params::stereoPreserveLegacyPercent));
+            stereoPreserve->setValueNotifyingHost (
+                stereoPreserve->convertTo0to1 (dnaorbit::params::stereoPreserveLegacyPercent));
     }
 }
 
