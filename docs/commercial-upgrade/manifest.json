@@ -2,7 +2,7 @@
   "package": "DNA Orbit Commercial Upgrade Package",
   "repository": "sunpotflower4460-cpu/DNA-Orbit",
   "state_schema": 3,
-  "status": "draft_pr_requires_local_build_and_listening",
+  "status": "draft_pr_requires_local_build_render_inspection_listening_and_host_validation",
   "design_documents": [
     "00_README_使い方.md",
     "01_世界基準プロダクト設計.md",
@@ -23,7 +23,8 @@
     "decisions/ADR-005-soft-bypass.md",
     "decisions/ADR-006-correlation-aware-mix.md",
     "decisions/ADR-007-bass-anchor-and-character.md",
-    "decisions/ADR-008-host-phase-lock.md"
+    "decisions/ADR-008-host-phase-lock.md",
+    "decisions/ADR-009-user-centered-editor-architecture.md"
   ],
   "claude_code_foundation": {
     "always_loaded": [
@@ -48,6 +49,7 @@
       ".claude/skills/audio-quality-gate/SKILL.md",
       ".claude/skills/experiment-design/SKILL.md",
       ".claude/skills/optimize-dsp-safely/SKILL.md",
+      ".claude/skills/ui-ux-audit/SKILL.md",
       ".claude/skills/adversarial-review/SKILL.md",
       ".claude/skills/release-gate/SKILL.md"
     ],
@@ -55,7 +57,8 @@
       ".claude/agents/physics-auditor.md",
       ".claude/agents/audio-quality-auditor.md",
       ".claude/agents/realtime-safety-reviewer.md",
-      ".claude/agents/validation-architect.md"
+      ".claude/agents/validation-architect.md",
+      ".claude/agents/ui-ux-auditor.md"
     ],
     "deep_standards": [
       "../claude-code/README.md",
@@ -64,6 +67,7 @@
       "../claude-code/PHYSICS_FIDELITY_STANDARD.md",
       "../claude-code/PHYSICAL_AUDIO_ROADMAP.md",
       "../claude-code/AUDIO_QUALITY_STANDARD.md",
+      "../claude-code/UI_UX_STANDARD.md",
       "../claude-code/EXPERIMENT_AND_VALIDATION_PROTOCOL.md",
       "../claude-code/QUALITY_SCORECARD.md",
       "../claude-code/ASSUMPTIONS_REGISTER.md",
@@ -90,11 +94,25 @@
     "Free Retrigger Host Lock phase modes",
     "time-signature-aware bar divisions",
     "local Release sanitizer screenshot and benchmark workflow",
-    "keyboard focus and dependent-control UI states",
     "Claude Code project memory and scoped engineering rules",
-    "independent physics audio quality realtime and validation reviewers",
-    "physical fidelity audio quality experiment and release standards",
-    "primary-source research and evidence-based optimization workflows"
+    "independent physics audio quality realtime validation and UI UX reviewers",
+    "physical fidelity audio quality UI UX experiment and release standards",
+    "primary-source research and evidence-based optimization workflows",
+    "persistent preset and Soft Bypass header actions",
+    "Basic workflow with visible Sync dependency and level matching",
+    "responsive Motion Space Output Detail architecture",
+    "semantic colour hierarchy and custom accessible controls",
+    "minimum standard wide warning Sync and Bypass screenshot matrix"
+  ],
+  "ui_validation_matrix": [
+    "ui_basic_min_free_820x650.png",
+    "ui_basic_min_sync_820x650.png",
+    "ui_detail_min_820x650.png",
+    "ui_basic_standard_960x700.png",
+    "ui_detail_standard_960x700.png",
+    "ui_detail_wide_1440x900.png",
+    "ui_detail_nullcore_960x700.png",
+    "ui_basic_softbypass_960x700.png"
   ],
   "local_validation": {
     "preflight_command": "bash scripts/agent-preflight.sh",
@@ -106,7 +124,10 @@
   "remaining_release_gates": [
     "Release build and complete CTest",
     "ASan and UBSan",
-    "headless screenshot inspection",
+    "render and inspect complete UI screenshot matrix",
+    "keyboard focus and activation test",
+    "DPI host scaling and repeated resize test",
+    "observed first-time user workflow",
     "pluginval strictness 10",
     "VST3 Validator",
     "auval on macOS",
