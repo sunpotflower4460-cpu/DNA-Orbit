@@ -30,10 +30,8 @@ namespace dnaorbit::dsp
             bool autoGain = true;
             bool softBypass = false;
             float stereoPreserve01 = 0.0f;
-
             float bassAnchorHz = 20.0f;
             int character = 0;
-
             int phaseMode = 0;
             float startPhaseDegrees = 0.0f;
             bool reverseDirection = false;
@@ -83,7 +81,6 @@ namespace dnaorbit::dsp
         double resyncStartError = 0.0;
         int resyncSamplesRemaining = 0;
         int resyncSamplesTotal = 1;
-
         float dryWetCorrelationEstimate = 0.0f;
 
         int phaseModeTarget = 0;
@@ -143,7 +140,12 @@ namespace dnaorbit::dsp
         static constexpr double mixCorrelationTimeSeconds = 0.25;
         static constexpr float minMixPredictedPower = 0.5f;
         static constexpr float maxMixPredictedPower = 2.0f;
-        static constexpr int controlIntervalSamples = 16;
+
+        // Keep the legacy path sample-accurate until a measured interpolation
+        // scheme has its own regression corpus. The crossover and symmetric
+        // trigonometric reuse still reduce work in the new path without
+        // silently changing old sessions.
+        static constexpr int controlIntervalSamples = 1;
 
         std::atomic<float> uiThetaA { 0.0f };
         std::atomic<float> uiThetaB { static_cast<float> (orbitmath::pi) };
