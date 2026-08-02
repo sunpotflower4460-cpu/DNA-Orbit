@@ -2,7 +2,13 @@
   "package": "DNA Orbit Commercial Upgrade Package",
   "repository": "sunpotflower4460-cpu/DNA-Orbit",
   "state_schema": 3,
-  "status": "draft_pr_requires_local_build_render_inspection_listening_and_host_validation",
+  "product_constitution": {
+    "version": "1.0.0",
+    "path": "../governance/PRODUCT_CONSTITUTION.md",
+    "sha256": "d844bc6704ecc6c5e37541f9cded38e06458e2aae54ae3d4abeba53a85306b41",
+    "owner_approval": "pending before release-mode acceptance"
+  },
+  "status": "draft_pr_requires_governance_local_build_render_inspection_listening_and_host_validation",
   "design_documents": [
     "00_README_使い方.md",
     "01_世界基準プロダクト設計.md",
@@ -24,8 +30,24 @@
     "decisions/ADR-006-correlation-aware-mix.md",
     "decisions/ADR-007-bass-anchor-and-character.md",
     "decisions/ADR-008-host-phase-lock.md",
-    "decisions/ADR-009-user-centered-editor-architecture.md"
+    "decisions/ADR-009-user-centered-editor-architecture.md",
+    "decisions/ADR-010-quality-governance-system.md"
   ],
+  "quality_governance": {
+    "constitution": "../governance/PRODUCT_CONSTITUTION.md",
+    "operating_system": "../governance/QUALITY_GOVERNANCE_SYSTEM.md",
+    "risk_model": "../governance/CHANGE_RISK_MODEL.md",
+    "decision_exception_policy": "../governance/DECISION_AND_EXCEPTION_POLICY.md",
+    "machine_policy": "../../quality/governance.json",
+    "constitution_lock": "../../quality/constitution.sha256",
+    "change_records": "../quality/changes/",
+    "independent_reviews": "../quality/reviews/",
+    "exceptions": "../quality/exceptions/",
+    "quality_debt": "../quality/QUALITY_DEBT_LEDGER.md",
+    "release_decisions": "../quality/RELEASE_DECISION_LOG.md",
+    "development_command": "bash scripts/quality-gate.sh",
+    "release_command": "bash scripts/quality-gate.sh --release"
+  },
   "claude_code_foundation": {
     "always_loaded": [
       "AGENTS.md",
@@ -43,6 +65,7 @@
       ".claude/rules/docs-and-claims.md"
     ],
     "skills": [
+      ".claude/skills/quality-governance/SKILL.md",
       ".claude/skills/start-dsp-task/SKILL.md",
       ".claude/skills/research-primary-sources/SKILL.md",
       ".claude/skills/physics-audit/SKILL.md",
@@ -54,6 +77,7 @@
       ".claude/skills/release-gate/SKILL.md"
     ],
     "read_only_subagents": [
+      ".claude/agents/quality-governor.md",
       ".claude/agents/physics-auditor.md",
       ".claude/agents/audio-quality-auditor.md",
       ".claude/agents/realtime-safety-reviewer.md",
@@ -78,8 +102,10 @@
     "experiment_records": "../experiments/",
     "local_commands": [
       "bash scripts/agent-preflight.sh",
+      "bash scripts/quality-gate.sh",
       "bash scripts/static-realtime-audit.sh",
-      "bash scripts/validate-local.sh"
+      "bash scripts/validate-local.sh",
+      "bash scripts/quality-gate.sh --release"
     ]
   },
   "implemented_workstreams": [
@@ -87,7 +113,7 @@
     "deterministic factory presets",
     "host bypass state continuity",
     "centered Mid orbit and stationary Side bed",
-    "correlation-aware Dry/Wet normalization",
+    "correlation-aware Dry Wet normalization",
     "Soft Bypass",
     "Bass Anchor",
     "Natural Vivid Deep Character",
@@ -95,14 +121,20 @@
     "time-signature-aware bar divisions",
     "local Release sanitizer screenshot and benchmark workflow",
     "Claude Code project memory and scoped engineering rules",
-    "independent physics audio quality realtime validation and UI UX reviewers",
+    "independent quality physics audio realtime validation and UI UX reviewers",
     "physical fidelity audio quality UI UX experiment and release standards",
     "primary-source research and evidence-based optimization workflows",
     "persistent preset and Soft Bypass header actions",
     "Basic workflow with visible Sync dependency and level matching",
     "responsive Motion Space Output Detail architecture",
     "semantic colour hierarchy and custom accessible controls",
-    "minimum standard wide warning Sync and Bypass screenshot matrix"
+    "minimum standard wide warning Sync and Bypass screenshot matrix",
+    "constitution-backed R0-R4 quality governance",
+    "G0-G6 change lifecycle and concept-drift review",
+    "machine-readable governance manifest and SHA-256 constitution lock",
+    "expiring exception policy and quality debt ledger",
+    "development and release governance audit modes",
+    "separate release decision log"
   ],
   "ui_validation_matrix": [
     "ui_basic_min_free_820x650.png",
@@ -116,12 +148,16 @@
   ],
   "local_validation": {
     "preflight_command": "bash scripts/agent-preflight.sh",
+    "governance_command": "bash scripts/quality-gate.sh",
     "realtime_audit_command": "bash scripts/static-realtime-audit.sh",
     "complete_command": "bash scripts/validate-local.sh",
+    "release_governance_command": "bash scripts/quality-gate.sh --release",
     "required_before_ready_for_review": true,
     "github_actions_enabled": false
   },
   "remaining_release_gates": [
+    "product-owner review and approval of Product Constitution 1.0.0",
+    "development and release governance audits",
     "Release build and complete CTest",
     "ASan and UBSan",
     "render and inspect complete UI screenshot matrix",
@@ -134,6 +170,8 @@
     "real DAW matrix",
     "level-matched listening and preset tuning",
     "CPU benchmark review",
+    "quality debt and exception review",
+    "separate release decision entry",
     "signing notarization and installers"
   ]
 }
