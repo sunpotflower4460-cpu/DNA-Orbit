@@ -74,7 +74,8 @@ namespace dnaorbit::dsp
         resyncSamplesRemaining = 0;
         dryWetCorrelationEstimate = 0.0f;
         hostLockWasActive = false;
-        expectedNextHostPhase = 0.0;
+        expectedNextHostPhaseA = 0.0;
+        expectedNextHostPhaseB = orbitmath::pi;
         hostCorrectionStartA = 0.0;
         hostCorrectionStartB = 0.0;
         hostCorrectionSamplesRemaining = 0;
@@ -195,8 +196,8 @@ namespace dnaorbit::dsp
             ? orbitmath::angularIncrement (hostRate, sampleRate)
             : 0.0;
         const double hostPpqCycles = hostPpqPositionTarget / cycleBeatsTarget;
-        const double hostRawStart = startRadians + directionSign * orbitmath::twoPi * hostPpqCycles;
-        const double hostBlockPhase = orbitmath::wrapTwoPi (hostRawStart);
+        const double hostRawStartA = startRadians + directionSign * orbitmath::twoPi * hostPpqCycles;
+        const double hostBlockPhaseA = orbitmath::wrapTwoPi (hostRawStartA);
 
         const float targetSymmetry = symmetrySmoothed.getTargetValue();
         const bool targetLocked = targetSymmetry >= (float) symmetryLockThreshold;
@@ -210,7 +211,7 @@ namespace dnaorbit::dsp
         {
             if (! hostLockWasActive || transportJustStartedTarget)
             {
-                thetaA = hostBlockPhase;
+                thetaA = hostBlockPhaseA;
                 thetaB = hostBlockPhaseB;
                 symmetryLocked = targetLocked;
                 hostCorrectionStartA = 0.0;
@@ -219,20 +220,25 @@ namespace dnaorbit::dsp
             }
             else
             {
-                const double discontinuity = std::abs (
-                    orbitmath::shortestAngleDelta (expectedNextHostPhase, hostBlockPhase));
-                const double tolerance = std::max (0.02, std::abs (hostIncrement) * 8.0);
+                const double discontinuityA = std::abs (
+                    orbitmath::shortestAngleDelta (expectedNextHostPhaseA, hostBlockPhaseA));
+                const double discontinuityB = std::abs (
+                    orbitmath::shortestAngleDelta (expectedNextHostPhaseB, hostBlockPhaseB));
+                const double toleranceA = std::max (0.02, std::abs (hostIncrement) * 8.0);
+                const double toleranceB = std::max (0.02, std::abs (hostIncrement * targetBScale) * 8.0);
 
-                if (discontinuity > tolerance)
+                if (discontinuityA > toleranceA || discontinuityB > toleranceB)
                 {
-                    hostCorrectionStartA = orbitmath::shortestAngleDelta (hostBlockPhase, thetaA);
+                    hostCorrectionStartA = orbitmath::shortestAngleDelta (hostBlockPhaseA, thetaA);
                     hostCorrectionStartB = orbitmath::shortestAngleDelta (hostBlockPhaseB, thetaB);
                     hostCorrectionSamplesRemaining = hostCorrectionSamplesTotal;
                 }
             }
 
-            expectedNextHostPhase = orbitmath::wrapTwoPi (
-                hostBlockPhase + directionSign * hostIncrement * (double) numSamples);
+            expectedNextHostPhaseA = orbitmath::wrapTwoPi (
+                hostBlockPhaseA + directionSign * hostIncrement * (double) numSamples);
+            expectedNextHostPhaseB = orbitmath::wrapTwoPi (
+                hostBlockPhaseB + directionSign * hostIncrement * targetBScale * (double) numSamples);
             hostLockWasActive = true;
         }
         else
@@ -286,11 +292,11 @@ namespace dnaorbit::dsp
                                        / (double) hostCorrectionSamplesTotal;
 
                 const double nominalA = orbitmath::wrapTwoPi (
-                    hostBlockPhase + directionSign * hostIncrement * (double) n);
+                    hostBlockPhaseA + directionSign * hostIncrement * (double) n);
                 thetaA = orbitmath::wrapTwoPi (
                     nominalA + hostCorrectionStartA * correctionFraction);
                 phaseAccumA = positiveFmod (
-                    hostRawStart + directionSign * hostIncrement * (double) n
+                    hostRawStartA + directionSign * hostIncrement * (double) n
                     + hostCorrectionStartA * correctionFraction,
                     phaseModulus);
             }
@@ -301,18 +307,15 @@ namespace dnaorbit::dsp
             }
 
             const bool wantsLocked = symmetry >= (float) symmetryLockThreshold;
+            const bool effectiveLocked = useHostLock ? targetLocked : wantsLocked;
 
             if (useHostLock)
             {
-                const double diff = orbitmath::rateDifferenceFactor ((double) symmetry, maxRateDifference);
-                const double bScale = wantsLocked ? 1.0 : 1.0 + diff;
                 const double nominalB = orbitmath::wrapTwoPi (
-                    startRadians + orbitmath::pi
-                    + directionSign * orbitmath::twoPi * hostPpqCycles * bScale
-                    + directionSign * hostIncrement * bScale * (double) n);
+                    hostBlockPhaseB + directionSign * hostIncrement * targetBScale * (double) n);
                 thetaB = orbitmath::wrapTwoPi (
                     nominalB + hostCorrectionStartB * correctionFraction);
-                symmetryLocked = wantsLocked;
+                symmetryLocked = targetLocked;
                 resyncSamplesRemaining = 0;
 
                 if (hostCorrectionSamplesRemaining > 0)
@@ -357,8 +360,8 @@ namespace dnaorbit::dsp
 
             const double sinA = std::sin (thetaA);
             const double cosA = std::cos (thetaA);
-            const double sinB = symmetryLocked && wantsLocked ? -sinA : std::sin (thetaB);
-            const double cosB = symmetryLocked && wantsLocked ? -cosA : std::cos (thetaB);
+            const double sinB = effectiveLocked ? -sinA : std::sin (thetaB);
+            const double cosB = effectiveLocked ? -cosA : std::cos (thetaB);
             const double backAmountA = 0.5 * (1.0 - cosA);
             const double backAmountB = 0.5 * (1.0 - cosB);
 
