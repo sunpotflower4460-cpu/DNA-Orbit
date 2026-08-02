@@ -38,14 +38,16 @@ namespace dnaorbit::dsp
             bool  autoGain   = true;
 
             /**
-             * 0 = both strands (and Core) are fed from a shared Mid downmix
-             * (the schema-1 behaviour: anti-phase stereo input collapses Wet
-             * to silence). 1 = Strand A/B are fed directly from L/R. Defaults
-             * to 0 here - the schema-1-compatible, source-independent
-             * default - so any caller that forgets to set it explicitly gets
-             * the old behaviour rather than a silent change; the actual
-             * product default of 70% lives in Parameters.h and is applied by
-             * PluginProcessor.
+             * Amount of the original Side signal retained as a stationary
+             * stereo bed around the centred DNA orbit. The two moving strands
+             * themselves are always driven by the shared Mid signal, so at
+             * Symmetry 100% their centre cannot be biased by unrelated L/R
+             * programme energy. 0 reproduces the schema-1 Mid-only path; 1
+             * restores the input Side at unity (L += Side, R -= Side).
+             *
+             * The engine-level default remains 0 for source compatibility.
+             * The product default for fresh instances is declared in
+             * Parameters.h and legacy saved projects migrate to 0.
              */
             float stereoPreserve01 = 0.0f;
         };
