@@ -17,6 +17,7 @@
     "docs/governance/DECISION_AND_EXCEPTION_POLICY.md",
     "docs/claude-code/QUALITY_SCORECARD.md",
     "docs/claude-code/ASSUMPTIONS_REGISTER.md",
+    "docs/quality/README.md",
     "docs/quality/QUALITY_DEBT_LEDGER.md",
     "docs/quality/RELEASE_DECISION_LOG.md",
     "docs/quality/changes/TEMPLATE.md",
