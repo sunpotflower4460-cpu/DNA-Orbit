@@ -42,26 +42,10 @@ public:
     juce::AudioProcessorValueTreeState apvts;
 
     dnaorbit::dsp::HelixEngine& getEngine() noexcept { return engine; }
-
-    /**
-     * Schema version the currently-loaded state was saved under (see
-     * Parameters::currentStateSchemaVersion). A fresh instance with nothing
-     * loaded reports the current version, i.e. "nothing to migrate". Future
-     * parameters that need a different default for state saved before they
-     * existed (e.g. Stereo Preserve in a later phase) should compare against
-     * this rather than re-deriving version logic themselves.
-     */
     int getLoadedSchemaVersion() const noexcept { return loadedSchemaVersion; }
 
 private:
     dnaorbit::dsp::HelixEngine engine;
-
-    /**
-     * Scratch space for processBlockBypassed(): sized once in prepareToPlay()
-     * so the audio thread never allocates. Lets the engine's internal state
-     * (orbit phase, smoothers, filters) keep advancing while bypassed without
-     * touching the audible dry passthrough - see processBlockBypassed().
-     */
     juce::AudioBuffer<float> bypassScratchBuffer;
 
     std::atomic<float>* rateHzParam     = nullptr;
@@ -77,6 +61,7 @@ private:
     std::atomic<float>* outputParam     = nullptr;
     std::atomic<float>* autoGainParam   = nullptr;
     std::atomic<float>* stereoPreserveParam = nullptr;
+    std::atomic<float>* softBypassParam = nullptr;
 
     int loadedSchemaVersion = dnaorbit::params::currentStateSchemaVersion;
 
