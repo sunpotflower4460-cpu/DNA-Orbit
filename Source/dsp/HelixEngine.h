@@ -93,7 +93,8 @@ namespace dnaorbit::dsp
         double cycleBeatsTarget = 4.0;
 
         bool hostLockWasActive = false;
-        double expectedNextHostPhase = 0.0;
+        double expectedNextHostPhaseA = 0.0;
+        double expectedNextHostPhaseB = orbitmath::pi;
         double hostCorrectionStartA = 0.0;
         double hostCorrectionStartB = 0.0;
         int hostCorrectionSamplesRemaining = 0;
