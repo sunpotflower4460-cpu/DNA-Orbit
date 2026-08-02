@@ -21,7 +21,8 @@ namespace
     {
         dnaorbit::dsp::HelixEngine engine;
         juce::AudioBuffer<float> buffer;
-        double phase = 0.0;
+        double midPhase = 0.0;
+        double sidePhase = 0.0;
 
         Instance (double sampleRate, int blockSize)
             : buffer (2, blockSize)
@@ -49,21 +50,23 @@ namespace
         {
             auto* left = buffer.getWritePointer (0);
             auto* right = buffer.getWritePointer (1);
-            const double incA = juce::MathConstants<double>::twoPi * 220.0 / sampleRate;
-            const double incB = juce::MathConstants<double>::twoPi * 337.0 / sampleRate;
+            const double midIncrement = juce::MathConstants<double>::twoPi * 220.0 / sampleRate;
+            const double sideIncrement = juce::MathConstants<double>::twoPi * 337.0 / sampleRate;
 
             for (int n = 0; n < buffer.getNumSamples(); ++n)
             {
-                const float mid = 0.22f * (float) std::sin (phase);
-                const float side = 0.08f * (float) std::sin (phase * (337.0 / 220.0));
+                const float mid = 0.22f * (float) std::sin (midPhase);
+                const float side = 0.08f * (float) std::sin (sidePhase);
                 left[n] = mid + side;
                 right[n] = mid - side;
-                phase += incA;
-                if (phase >= juce::MathConstants<double>::twoPi)
-                    phase -= juce::MathConstants<double>::twoPi;
-            }
 
-            juce::ignoreUnused (incB);
+                midPhase += midIncrement;
+                sidePhase += sideIncrement;
+                if (midPhase >= juce::MathConstants<double>::twoPi)
+                    midPhase -= juce::MathConstants<double>::twoPi;
+                if (sidePhase >= juce::MathConstants<double>::twoPi)
+                    sidePhase -= juce::MathConstants<double>::twoPi;
+            }
         }
     };
 
@@ -77,7 +80,6 @@ namespace
         for (int i = 0; i < c.instances; ++i)
             instances.push_back (std::make_unique<Instance> (c.sampleRate, c.blockSize));
 
-        // Warm caches and branch predictors before timing.
         for (int block = 0; block < 100; ++block)
             for (auto& instance : instances)
             {
@@ -97,8 +99,7 @@ namespace
         const double elapsed = std::chrono::duration<double> (finish - start).count();
         const double samplesProcessed = (double) blocks * c.blockSize * c.instances;
         const double nsPerSamplePerInstance = elapsed * 1.0e9 / samplesProcessed;
-        const double realtimeBudget = simulatedSeconds;
-        const double realtimePercentAllInstances = elapsed / realtimeBudget * 100.0;
+        const double realtimePercentAllInstances = elapsed / simulatedSeconds * 100.0;
 
         std::cout << std::fixed << std::setprecision (3)
                   << std::setw (7) << c.sampleRate << " Hz  "
