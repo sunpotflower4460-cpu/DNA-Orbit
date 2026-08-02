@@ -26,24 +26,23 @@ namespace dnaorbit::dsp
     void HelixEngine::prepare (double newSampleRate, int maximumBlockSize, int /*maxChannelsHint*/)
     {
         sampleRate = newSampleRate > 0.0 ? newSampleRate : 44100.0;
+        constexpr double standardSmoothing = 0.05;
+        constexpr double nullCoreSmoothing = 0.12;
 
-        constexpr double smoothParamSeconds = 0.05;
-        constexpr double nullCoreSeconds = 0.12;
-
-        radiusSmoothed.reset (sampleRate, smoothParamSeconds);
-        depthSmoothed.reset (sampleRate, smoothParamSeconds);
-        symmetrySmoothed.reset (sampleRate, smoothParamSeconds);
-        twistSmoothed.reset (sampleRate, smoothParamSeconds);
-        coreSmoothed.reset (sampleRate, smoothParamSeconds);
-        mixSmoothed.reset (sampleRate, smoothParamSeconds);
-        outputGainSmoothed.reset (sampleRate, smoothParamSeconds);
-        nullCoreMixSmoothed.reset (sampleRate, nullCoreSeconds);
-        rateHzSmoothed.reset (sampleRate, smoothParamSeconds);
-        autoGainAmountSmoothed.reset (sampleRate, nullCoreSeconds);
-        stereoPreserveSmoothed.reset (sampleRate, smoothParamSeconds);
+        radiusSmoothed.reset (sampleRate, standardSmoothing);
+        depthSmoothed.reset (sampleRate, standardSmoothing);
+        symmetrySmoothed.reset (sampleRate, standardSmoothing);
+        twistSmoothed.reset (sampleRate, standardSmoothing);
+        coreSmoothed.reset (sampleRate, standardSmoothing);
+        mixSmoothed.reset (sampleRate, standardSmoothing);
+        outputGainSmoothed.reset (sampleRate, standardSmoothing);
+        nullCoreMixSmoothed.reset (sampleRate, nullCoreSmoothing);
+        rateHzSmoothed.reset (sampleRate, standardSmoothing);
+        autoGainAmountSmoothed.reset (sampleRate, nullCoreSmoothing);
+        stereoPreserveSmoothed.reset (sampleRate, standardSmoothing);
         softBypassSmoothed.reset (sampleRate, softBypassSeconds);
-        bassAnchorSmoothed.reset (sampleRate, smoothParamSeconds);
-        characterSmoothed.reset (sampleRate, smoothParamSeconds);
+        bassAnchorSmoothed.reset (sampleRate, standardSmoothing);
+        characterSmoothed.reset (sampleRate, standardSmoothing);
 
         crossoverL.prepare (sampleRate);
         crossoverR.prepare (sampleRate);
@@ -61,7 +60,6 @@ namespace dnaorbit::dsp
 
         resyncSamplesTotal = juce::jmax (1, (int) std::round (resyncDurationSeconds * sampleRate));
         hostCorrectionSamplesTotal = juce::jmax (1, (int) std::round (hostCorrectionSeconds * sampleRate));
-
         isPrepared = true;
         reset();
     }
@@ -129,22 +127,18 @@ namespace dnaorbit::dsp
     void HelixEngine::applyParameters (const Parameters& p, bool snapImmediately) noexcept
     {
         const float rateHz = std::clamp (sanitizeParam (p.rateHz, 0.12f), 0.0f, 20.0f);
-        const float radius01 = std::clamp (sanitizeParam (p.radius01, 0.8f), 0.0f, 1.0f);
-        const float depth01 = std::clamp (sanitizeParam (p.depth01, 0.55f), 0.0f, 1.0f);
-        const float symmetry01 = std::clamp (sanitizeParam (p.symmetry01, 1.0f), 0.0f, 1.0f);
-        const float twistMs = std::clamp (sanitizeParam (p.twistMs, 5.0f), 0.0f, 20.0f);
-        const float core01 = std::clamp (sanitizeParam (p.core01, 0.0f), 0.0f, 1.0f);
-        const float mix01 = std::clamp (sanitizeParam (p.mix01, 0.35f), 0.0f, 1.0f);
+        const float radius = std::clamp (sanitizeParam (p.radius01, 0.8f), 0.0f, 1.0f);
+        const float depth = std::clamp (sanitizeParam (p.depth01, 0.55f), 0.0f, 1.0f);
+        const float symmetry = std::clamp (sanitizeParam (p.symmetry01, 1.0f), 0.0f, 1.0f);
+        const float twist = std::clamp (sanitizeParam (p.twistMs, 5.0f), 0.0f, 20.0f);
+        const float core = std::clamp (sanitizeParam (p.core01, 0.0f), 0.0f, 1.0f);
+        const float mix = std::clamp (sanitizeParam (p.mix01, 0.35f), 0.0f, 1.0f);
         const float outputGain = dbToGain (std::clamp (sanitizeParam (p.outputDb, 0.0f), -60.0f, 24.0f));
-        const float stereoPreserve01 = std::clamp (sanitizeParam (p.stereoPreserve01, 0.0f), 0.0f, 1.0f);
-        const float bassAnchorHz = std::clamp (sanitizeParam (p.bassAnchorHz, 20.0f), 20.0f, 500.0f);
+        const float preserve = std::clamp (sanitizeParam (p.stereoPreserve01, 0.0f), 0.0f, 1.0f);
+        const float anchor = std::clamp (sanitizeParam (p.bassAnchorHz, 20.0f), 20.0f, 500.0f);
         const float character = std::clamp ((float) p.character, 0.0f, 2.0f);
 
-        const float autoGainAmount = p.autoGain ? 1.0f : 0.0f;
-        const float nullCoreAmount = p.nullCore ? 1.0f : 0.0f;
-        const float softBypassAmount = p.softBypass ? 1.0f : 0.0f;
-
-        auto setValue = [snapImmediately] (auto& smoother, float value)
+        auto set = [snapImmediately] (auto& smoother, float value)
         {
             if (snapImmediately)
                 smoother.setCurrentAndTargetValue (value);
@@ -152,31 +146,32 @@ namespace dnaorbit::dsp
                 smoother.setTargetValue (value);
         };
 
-        setValue (rateHzSmoothed, rateHz);
-        setValue (autoGainAmountSmoothed, autoGainAmount);
-        setValue (radiusSmoothed, radius01);
-        setValue (depthSmoothed, depth01);
-        setValue (symmetrySmoothed, symmetry01);
-        setValue (twistSmoothed, twistMs);
-        setValue (coreSmoothed, core01);
-        setValue (mixSmoothed, mix01);
-        setValue (outputGainSmoothed, outputGain);
-        setValue (nullCoreMixSmoothed, nullCoreAmount);
-        setValue (stereoPreserveSmoothed, stereoPreserve01);
-        setValue (softBypassSmoothed, softBypassAmount);
-        setValue (bassAnchorSmoothed, bassAnchorHz);
-        setValue (characterSmoothed, character);
+        set (rateHzSmoothed, rateHz);
+        set (radiusSmoothed, radius);
+        set (depthSmoothed, depth);
+        set (symmetrySmoothed, symmetry);
+        set (twistSmoothed, twist);
+        set (coreSmoothed, core);
+        set (mixSmoothed, mix);
+        set (outputGainSmoothed, outputGain);
+        set (autoGainAmountSmoothed, p.autoGain ? 1.0f : 0.0f);
+        set (nullCoreMixSmoothed, p.nullCore ? 1.0f : 0.0f);
+        set (stereoPreserveSmoothed, preserve);
+        set (softBypassSmoothed, p.softBypass ? 1.0f : 0.0f);
+        set (bassAnchorSmoothed, anchor);
+        set (characterSmoothed, character);
 
         phaseModeTarget = std::clamp (p.phaseMode, 0, 2);
         startPhaseDegreesTarget = std::clamp (sanitizeParam (p.startPhaseDegrees, 0.0f), 0.0f, 360.0f);
         reverseDirectionTarget = p.reverseDirection;
+        transportPlayingTarget = p.transportPlaying;
         transportJustStartedTarget = p.transportJustStarted;
         hostPositionValidTarget = p.hostPositionValid && std::isfinite (p.hostPpqPosition);
         hostPpqPositionTarget = hostPositionValidTarget ? p.hostPpqPosition : 0.0;
         cycleBeatsTarget = std::isfinite (p.cycleBeats) && p.cycleBeats > 0.0 ? p.cycleBeats : 4.0;
 
         uiNullCoreOn.store (p.nullCore, std::memory_order_relaxed);
-        uiBassAnchorHz.store (bassAnchorHz, std::memory_order_relaxed);
+        uiBassAnchorHz.store (anchor, std::memory_order_relaxed);
     }
 
     void HelixEngine::process (juce::AudioBuffer<float>& buffer, int numInputChannels) noexcept
@@ -193,25 +188,22 @@ namespace dnaorbit::dsp
 
         const double directionSign = reverseDirectionTarget ? -1.0 : 1.0;
         const double startRadians = (double) startPhaseDegreesTarget * orbitmath::pi / 180.0;
-        const bool useHostLock = phaseModeTarget == 2
-                              && hostPositionValidTarget
-                              && cycleBeatsTarget > 0.0;
+        const bool useHostLock = phaseModeTarget == 2 && hostPositionValidTarget && cycleBeatsTarget > 0.0;
         const bool retriggerNow = phaseModeTarget == 1 && transportJustStartedTarget;
         const double hostRate = (double) rateHzSmoothed.getTargetValue();
-        const double hostIncrement = orbitmath::angularIncrement (hostRate, sampleRate);
+        const double hostIncrement = transportPlayingTarget
+            ? orbitmath::angularIncrement (hostRate, sampleRate)
+            : 0.0;
         const double hostPpqCycles = hostPpqPositionTarget / cycleBeatsTarget;
-        const double hostRawStart = startRadians
-                                  + directionSign * orbitmath::twoPi * hostPpqCycles;
+        const double hostRawStart = startRadians + directionSign * orbitmath::twoPi * hostPpqCycles;
         const double hostBlockPhase = orbitmath::wrapTwoPi (hostRawStart);
 
         const float targetSymmetry = symmetrySmoothed.getTargetValue();
         const bool targetLocked = targetSymmetry >= (float) symmetryLockThreshold;
-        const double targetDiff = orbitmath::rateDifferenceFactor ((double) targetSymmetry,
-                                                                    maxRateDifference);
+        const double targetDiff = orbitmath::rateDifferenceFactor ((double) targetSymmetry, maxRateDifference);
         const double targetBScale = targetLocked ? 1.0 : 1.0 + targetDiff;
         const double hostRawStartB = startRadians + orbitmath::pi
-                                   + directionSign * orbitmath::twoPi
-                                     * hostPpqCycles * targetBScale;
+                                   + directionSign * orbitmath::twoPi * hostPpqCycles * targetBScale;
         const double hostBlockPhaseB = orbitmath::wrapTwoPi (hostRawStartB);
 
         if (useHostLock)
@@ -284,49 +276,42 @@ namespace dnaorbit::dsp
             const float sampleInR = stereoIn && std::isfinite (inR[n]) ? inR[n] : sampleInL;
             const float dryL = sampleInL;
             const float dryR = sampleInR;
-
             const double incA = orbitmath::angularIncrement ((double) rateHz, sampleRate);
-            double hostCorrectionFraction = 0.0;
+            double correctionFraction = 0.0;
 
             if (useHostLock)
             {
+                if (hostCorrectionSamplesRemaining > 0)
+                    correctionFraction = (double) hostCorrectionSamplesRemaining
+                                       / (double) hostCorrectionSamplesTotal;
+
                 const double nominalA = orbitmath::wrapTwoPi (
                     hostBlockPhase + directionSign * hostIncrement * (double) n);
-
-                if (hostCorrectionSamplesRemaining > 0)
-                    hostCorrectionFraction = (double) hostCorrectionSamplesRemaining
-                                           / (double) hostCorrectionSamplesTotal;
-
                 thetaA = orbitmath::wrapTwoPi (
-                    nominalA + hostCorrectionStartA * hostCorrectionFraction);
+                    nominalA + hostCorrectionStartA * correctionFraction);
                 phaseAccumA = positiveFmod (
-                    hostRawStart + directionSign * hostIncrement * (double) n,
+                    hostRawStart + directionSign * hostIncrement * (double) n
+                    + hostCorrectionStartA * correctionFraction,
                     phaseModulus);
             }
-            else
+            else if (! (retriggerNow && n == 0))
             {
-                if (! (retriggerNow && n == 0))
-                {
-                    thetaA = orbitmath::wrapTwoPi (thetaA + directionSign * incA);
-                    phaseAccumA = positiveFmod (phaseAccumA + directionSign * incA,
-                                                phaseModulus);
-                }
+                thetaA = orbitmath::wrapTwoPi (thetaA + directionSign * incA);
+                phaseAccumA = positiveFmod (phaseAccumA + directionSign * incA, phaseModulus);
             }
 
             const bool wantsLocked = symmetry >= (float) symmetryLockThreshold;
 
             if (useHostLock)
             {
-                const double diff = orbitmath::rateDifferenceFactor ((double) symmetry,
-                                                                      maxRateDifference);
+                const double diff = orbitmath::rateDifferenceFactor ((double) symmetry, maxRateDifference);
                 const double bScale = wantsLocked ? 1.0 : 1.0 + diff;
                 const double nominalB = orbitmath::wrapTwoPi (
                     startRadians + orbitmath::pi
                     + directionSign * orbitmath::twoPi * hostPpqCycles * bScale
                     + directionSign * hostIncrement * bScale * (double) n);
-
                 thetaB = orbitmath::wrapTwoPi (
-                    nominalB + hostCorrectionStartB * hostCorrectionFraction);
+                    nominalB + hostCorrectionStartB * correctionFraction);
                 symmetryLocked = wantsLocked;
                 resyncSamplesRemaining = 0;
 
@@ -349,8 +334,7 @@ namespace dnaorbit::dsp
                         resyncSamplesRemaining = resyncSamplesTotal;
                     }
 
-                    const double fraction = (double) resyncSamplesRemaining
-                                          / (double) resyncSamplesTotal;
+                    const double fraction = (double) resyncSamplesRemaining / (double) resyncSamplesTotal;
                     thetaB = orbitmath::wrapTwoPi (desired - resyncStartError * fraction);
                     --resyncSamplesRemaining;
 
@@ -365,8 +349,7 @@ namespace dnaorbit::dsp
             {
                 symmetryLocked = false;
                 resyncSamplesRemaining = 0;
-                const double diff = orbitmath::rateDifferenceFactor ((double) symmetry,
-                                                                      maxRateDifference);
+                const double diff = orbitmath::rateDifferenceFactor ((double) symmetry, maxRateDifference);
                 const double incB = orbitmath::angularIncrement (
                     (double) rateHz * (1.0 + diff), sampleRate);
                 thetaB = orbitmath::wrapTwoPi (thetaB + directionSign * incB);
@@ -448,7 +431,6 @@ namespace dnaorbit::dsp
             delayA.setDelay (delaySamplesA);
             delayA.pushSample (0, filteredA);
             const float delayedA = delayA.popSample (0);
-
             const auto gainsA = orbitmath::equalPowerPan (radius * sinA);
             const float strandAL = delayedA * (float) gainsA.left * strandGain;
             const float strandAR = delayedA * (float) gainsA.right * strandGain;
@@ -457,7 +439,6 @@ namespace dnaorbit::dsp
             delayB.setDelay (delaySamplesB);
             delayB.pushSample (0, filteredB);
             const float delayedB = delayB.popSample (0);
-
             const auto gainsB = orbitmath::equalPowerPan (radius * sinB);
             const float strandBL = delayedB * (float) gainsB.left * strandGain;
             const float strandBR = delayedB * (float) gainsB.right * strandGain;
@@ -469,7 +450,6 @@ namespace dnaorbit::dsp
             const float aR = strandGain * cachedBackGainA * (float) gainsA.right;
             const float bL = strandGain * cachedBackGainB * (float) gainsB.left;
             const float bR = strandGain * cachedBackGainB * (float) gainsB.right;
-
             const float powerL = aL * aL + bL * bL + core * core
                                + 2.0f * (aL * bL * cachedCoherenceAB
                                        + aL * core * cachedCoherenceAC
@@ -512,14 +492,12 @@ namespace dnaorbit::dsp
 
             const float processedL = (dryWet.dry * dryL + dryWet.wet * wetL) * mixNorm * outGain;
             const float processedR = (dryWet.dry * dryR + dryWet.wet * wetR) * mixNorm * outGain;
-
             float finalL = processedL + (dryL - processedL) * softBypass;
             float finalR = processedR + (dryR - processedR) * softBypass;
 
             constexpr float antiDenormal = 1.0e-20f;
             finalL += antiDenormal; finalL -= antiDenormal;
             finalR += antiDenormal; finalR -= antiDenormal;
-
             outL[n] = finalL;
             outR[n] = finalR;
 
@@ -532,7 +510,6 @@ namespace dnaorbit::dsp
                 const auto posA = orbitmath::computePosition (thetaA, radius);
                 const auto posB = orbitmath::computePosition (thetaB, radius);
                 const auto centroid = orbitmath::computeCentroid (posA, posB);
-
                 uiThetaA.store ((float) thetaA, std::memory_order_relaxed);
                 uiThetaB.store ((float) thetaB, std::memory_order_relaxed);
                 uiRadius.store (radius, std::memory_order_relaxed);
@@ -552,7 +529,6 @@ namespace dnaorbit::dsp
             const double blockSeconds = (double) numSamples / sampleRate;
             const float correlationAlpha = (float) (1.0 - std::exp (
                 -blockSeconds / mixCorrelationTimeSeconds));
-
             float measuredDryWet = 0.0f;
             const double dryWetDenom = std::sqrt (sumDryPower * sumWetPower);
             if (dryWetDenom > 1.0e-12)
@@ -566,7 +542,6 @@ namespace dnaorbit::dsp
             const double invN = 1.0 / (double) numSamples;
             const double meanLL = sumLL * invN;
             const double meanRR = sumRR * invN;
-
             const float rms = (float) std::sqrt (0.5 * (meanLL + meanRR));
             uiOutputRms.store (std::isfinite (rms) ? rms : 0.0f,
                                std::memory_order_relaxed);
