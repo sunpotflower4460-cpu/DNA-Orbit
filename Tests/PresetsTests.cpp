@@ -11,18 +11,11 @@ namespace
 
         void runTest() override
         {
-            beginTest ("Every factory preset sets all 12 parameters deterministically, regardless of prior state");
+            beginTest ("Every factory preset sets the complete audio state deterministically");
             {
                 for (int i = 0; i < dnaorbit::presets::numPresets; ++i)
                 {
                     const auto& preset = dnaorbit::presets::presets[i];
-
-                    // Start from two wildly different prior states, so a
-                    // "deterministic" preset must land in the same place from
-                    // either one - this is the whole point of Phase 1's
-                    // rewrite (the old preset table left sync/division/
-                    // output/autoGain untouched, so the result depended on
-                    // whatever the user had before).
                     DNAOrbitAudioProcessor processorA;
                     DNAOrbitAudioProcessor processorB;
 
@@ -32,6 +25,7 @@ namespace
                     processorB.apvts.getParameter (dnaorbit::params::autoGainID)->setValueNotifyingHost (0.0f);
                     processorB.apvts.getParameter (dnaorbit::params::mixID)->setValueNotifyingHost (0.9f);
                     processorB.apvts.getParameter (dnaorbit::params::stereoPreserveID)->setValueNotifyingHost (0.05f);
+                    processorB.apvts.getParameter (dnaorbit::params::softBypassID)->setValueNotifyingHost (1.0f);
 
                     dnaorbit::presets::apply (processorA.apvts, preset);
                     dnaorbit::presets::apply (processorB.apvts, preset);
@@ -42,7 +36,7 @@ namespace
                                              dnaorbit::params::twistID, dnaorbit::params::coreID,
                                              dnaorbit::params::nullCoreID, dnaorbit::params::mixID,
                                              dnaorbit::params::outputID, dnaorbit::params::autoGainID,
-                                             dnaorbit::params::stereoPreserveID })
+                                             dnaorbit::params::stereoPreserveID, dnaorbit::params::softBypassID })
                     {
                         expectWithinAbsoluteError (processorA.apvts.getRawParameterValue (id)->load(),
                                                     processorB.apvts.getRawParameterValue (id)->load(), 1.0e-3f,
@@ -73,15 +67,13 @@ namespace
                 dnaorbit::presets::apply (processor.apvts, preset);
                 expect (dnaorbit::presets::matchesCurrentState (processor.apvts, preset));
 
-                // Nudge Mix far enough that it cannot be mistaken for float round-off.
-                processor.apvts.getParameter (dnaorbit::params::mixID)->setValueNotifyingHost (0.99f);
+                processor.apvts.getParameter (dnaorbit::params::softBypassID)->setValueNotifyingHost (1.0f);
                 expect (! dnaorbit::presets::matchesCurrentState (processor.apvts, preset),
-                        "Nudging a parameter away from the preset must be detected as modified");
+                        "Nudging Soft Bypass away from the preset must be detected as modified");
 
-                // Revert = re-applying the same preset.
                 dnaorbit::presets::apply (processor.apvts, preset);
                 expect (dnaorbit::presets::matchesCurrentState (processor.apvts, preset),
-                        "Re-applying the preset (Revert) must restore the matched state");
+                        "Re-applying the preset must restore the matched state");
             }
         }
     };
