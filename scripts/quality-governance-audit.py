@@ -134,21 +134,35 @@ def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def validate_headings(path: Path, headings: list[str], audit: Audit) -> None:
-    text = read_text(path)
-    for heading in headings:
-        if heading not in text:
-            audit.block(f"Change record {path} is missing required heading: {heading}")
-    placeholders = ("<short outcome>", "CHG-YYYYMMDD", "Risk tier: R0 /", "Owner:\n")
-    for placeholder in placeholders:
-        if placeholder in text:
-            audit.block(f"Change record {path} still contains template placeholder: {placeholder}")
-
-
 def parse_field(text: str, name: str) -> str | None:
     pattern = re.compile(rf"^\s*-?\s*{re.escape(name)}\s*:\s*(.*?)\s*$", re.IGNORECASE | re.MULTILINE)
     match = pattern.search(text)
     return match.group(1).strip() if match else None
+
+
+def split_patterns(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    return [part.strip() for part in re.split(r"[;,]", raw) if part.strip()]
+
+
+def parse_risk(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    match = re.search(r"\bR[0-4]\b", raw.upper())
+    return match.group(0) if match else None
+
+
+def validate_headings(path: Path, headings: list[str], audit: Audit) -> str:
+    text = read_text(path)
+    for heading in headings:
+        if heading not in text:
+            audit.block(f"Change record {path} is missing required heading: {heading}")
+    placeholders = ("<short outcome>", "CHG-YYYYMMDD", "Risk tier: R0 /", "Covered paths: <")
+    for placeholder in placeholders:
+        if placeholder in text:
+            audit.block(f"Change record {path} still contains template placeholder: {placeholder}")
+    return text
 
 
 def audit_exceptions(root: Path, policy: dict, release: bool, audit: Audit) -> list[dict]:
@@ -215,9 +229,17 @@ def self_test() -> int:
         "Source/ui/View.cpp": "R2",
         "README.md": "R0",
     }
-    failures = [f"{path}: expected {expected}, got {classify_path(path, rules)}"
-                for path, expected in cases.items()
-                if classify_path(path, rules) != expected]
+    failures = [
+        f"{path}: expected {expected}, got {classify_path(path, rules)}"
+        for path, expected in cases.items()
+        if classify_path(path, rules) != expected
+    ]
+    if split_patterns("Source/dsp/*; Tests/*, Source/Parameters.h") != [
+        "Source/dsp/*", "Tests/*", "Source/Parameters.h"
+    ]:
+        failures.append("coverage pattern parsing failed")
+    if parse_risk("R4 / CONSTITUTIONAL") != "R4":
+        failures.append("risk parsing failed")
     try:
         assert dt.date.fromisoformat("2026-08-02") == dt.date(2026, 8, 2)
     except (AssertionError, ValueError) as exc:
@@ -281,7 +303,8 @@ def main() -> int:
 
     base = resolve_base(root, args.base)
     changed = changed_files(root, base, audit)
-    risk, grouped = highest_risk(changed, policy.get("risk_rules", []))
+    rules = policy.get("risk_rules", [])
+    risk, grouped = highest_risk(changed, rules)
     audit.note(f"Resolved base: {base or 'none'}")
     audit.note(f"Changed files considered: {len(changed)}")
     audit.note(f"Highest change risk: {risk}")
@@ -289,19 +312,59 @@ def main() -> int:
     record_policy = policy["change_record"]
     records = changed_records(root, changed, record_policy["directory"])
     threshold = policy.get("change_record_required_at_or_above", "R2")
-    if changed and RISK_VALUE[risk] >= RISK_VALUE[threshold] and not records:
+    governed_changed = {
+        path for path in changed
+        if RISK_VALUE[classify_path(path, rules)] >= RISK_VALUE[threshold]
+        and not path.startswith(record_policy["directory"].rstrip("/") + "/")
+    }
+
+    if governed_changed and not records:
         audit.block(f"{risk} change requires a changed record under {record_policy['directory']}/")
+
+    record_reports: list[dict] = []
+    covered_by_any: set[str] = set()
     for record in records:
-        if record.is_file():
-            validate_headings(record, record_policy["required_headings"], audit)
-        else:
+        if not record.is_file():
             audit.block(f"Changed record cannot be read: {record.relative_to(root)}")
+            continue
+        text = validate_headings(record, record_policy["required_headings"], audit)
+        declared_risk = parse_risk(parse_field(text, "Risk tier"))
+        coverage_patterns = split_patterns(parse_field(text, "Covered paths"))
+        if declared_risk is None:
+            audit.block(f"Change record {record.relative_to(root)} has no valid Risk tier field.")
+            declared_risk = "R0"
+        if not coverage_patterns:
+            audit.block(f"Change record {record.relative_to(root)} has no Covered paths patterns.")
+
+        covered = sorted(path for path in governed_changed if matches(path, coverage_patterns))
+        covered_by_any.update(covered)
+        actual_risk, _ = highest_risk(covered, rules)
+        if covered and RISK_VALUE[declared_risk] < RISK_VALUE[actual_risk]:
+            audit.block(
+                f"Change record {record.relative_to(root)} declares {declared_risk} "
+                f"but covers {actual_risk} paths."
+            )
+        if not covered:
+            audit.warn(f"Changed record {record.relative_to(root)} covers no R2+ changed path in this diff.")
+        record_reports.append({
+            "path": record.relative_to(root).as_posix(),
+            "declared_risk": declared_risk,
+            "coverage_patterns": coverage_patterns,
+            "covered_changed_paths": covered,
+            "actual_covered_risk": actual_risk,
+        })
+
+    uncovered = sorted(governed_changed - covered_by_any)
+    for path in uncovered:
+        audit.block(f"R2+ changed path is not covered by any changed change record: {path}")
 
     critical = policy["critical_change_requirements"]
     if changed and RISK_VALUE[risk] >= RISK_VALUE[policy.get("adr_required_at_or_above", "R3")]:
         adrs = changed_records(root, changed, critical["adr_directory"], template_name="")
         if not adrs:
             audit.block(f"{risk} change requires a changed ADR under {critical['adr_directory']}/")
+    else:
+        adrs = []
     if changed and RISK_VALUE[risk] >= RISK_VALUE[policy.get("independent_review_required_at_or_above", "R3")]:
         reviews = changed_records(root, changed, critical["review_directory"])
         if not reviews:
@@ -331,7 +394,10 @@ def main() -> int:
         "highest_risk": risk,
         "changed_files": sorted(changed),
         "changed_files_by_risk": grouped,
-        "change_records": [path.relative_to(root).as_posix() for path in records],
+        "governed_changed_paths": sorted(governed_changed),
+        "uncovered_governed_paths": uncovered,
+        "change_records": record_reports,
+        "adr_records": [path.relative_to(root).as_posix() for path in adrs],
         "review_records": [path.relative_to(root).as_posix() for path in reviews],
         "active_exceptions": active_exceptions,
         "blockers": audit.blockers,
@@ -351,6 +417,7 @@ def main() -> int:
     print(f"Mode: {report['mode']}")
     print(f"Base: {base or 'unresolved'}")
     print(f"Highest risk: {risk}")
+    print(f"R2+ paths: {len(governed_changed)}; uncovered: {len(uncovered)}")
     for message in audit.info:
         print(f"INFO: {message}")
     for message in audit.warnings:
