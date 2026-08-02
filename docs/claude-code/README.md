@@ -3,7 +3,7 @@
 This directory is the durable technical foundation for future Claude Code work.
 It is designed to maximize results without loading every long procedure into every session.
 
-> **Validation state:** the files and scripts in this foundation are implemented in the current draft branch. They have not yet been exercised by an installed Claude Code session or by the repository’s full local build. Run the first-session check and `bash scripts/validate-local.sh` before treating the foundation as validated.
+> **Validation state:** the files and scripts in this foundation are implemented in the current draft branch. They have not yet been exercised by an installed Claude Code session or by the repository’s full local build. The expanded UI screenshot matrix is specified but has not yet been rendered or inspected. Run the first-session check and `bash scripts/validate-local.sh` before treating the foundation as validated.
 
 ## How the layers work
 
