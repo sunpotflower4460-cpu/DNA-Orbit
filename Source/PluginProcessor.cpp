@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include <cmath>
 
 namespace
 {
@@ -53,7 +54,10 @@ void DNAOrbitAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     previousTransportPlaying = false;
     engine.prepare (sampleRate, samplesPerBlock, getTotalNumOutputChannels());
     bypassScratchBuffer.setSize (2, samplesPerBlock, false, false, true);
-    engine.primeParameters (currentParameterSnapshot());
+
+    // AudioPlayHead timing is intentionally not queried from prepareToPlay().
+    // Some hosts only provide a valid playhead context during process callbacks.
+    engine.primeParameters (currentParameterSnapshot (false));
 }
 
 void DNAOrbitAudioProcessor::releaseResources()
@@ -73,7 +77,8 @@ bool DNAOrbitAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts)
         || inSet == juce::AudioChannelSet::stereo();
 }
 
-dnaorbit::dsp::HelixEngine::Parameters DNAOrbitAudioProcessor::currentParameterSnapshot() noexcept
+dnaorbit::dsp::HelixEngine::Parameters
+DNAOrbitAudioProcessor::currentParameterSnapshot (bool includeHostPosition) noexcept
 {
     using namespace dnaorbit::params;
 
@@ -103,39 +108,45 @@ dnaorbit::dsp::HelixEngine::Parameters DNAOrbitAudioProcessor::currentParameterS
     int denominator = 4;
     double bpm = 0.0;
 
-    if (auto* currentPlayHead = getPlayHead())
+    if (includeHostPosition)
     {
-        if (const auto position = currentPlayHead->getPosition())
+        if (auto* currentPlayHead = getPlayHead())
         {
-            p.transportPlaying = position->getIsPlaying();
-
-            if (const auto hostBpm = position->getBpm())
-                bpm = *hostBpm;
-
-            if (const auto signature = position->getTimeSignature())
+            if (const auto position = currentPlayHead->getPosition())
             {
-                numerator = signature->numerator;
-                denominator = signature->denominator;
-            }
+                p.transportPlaying = position->getIsPlaying();
 
-            if (const auto ppq = position->getPpqPosition())
-            {
-                p.hostPositionValid = std::isfinite (*ppq);
-                p.hostPpqPosition = p.hostPositionValid ? *ppq : 0.0;
+                if (const auto hostBpm = position->getBpm())
+                    bpm = *hostBpm;
+
+                if (const auto signature = position->getTimeSignature())
+                {
+                    numerator = signature->numerator;
+                    denominator = signature->denominator;
+                }
+
+                if (const auto ppq = position->getPpqPosition())
+                {
+                    p.hostPositionValid = std::isfinite (*ppq);
+                    p.hostPpqPosition = p.hostPositionValid ? *ppq : 0.0;
+                }
             }
         }
     }
 
-    p.transportJustStarted = p.transportPlaying && ! previousTransportPlaying;
-    previousTransportPlaying = p.transportPlaying;
+    p.transportJustStarted = includeHostPosition
+                          && p.transportPlaying
+                          && ! previousTransportPlaying;
+
+    if (includeHostPosition)
+        previousTransportPlaying = p.transportPlaying;
+
     p.cycleBeats = divisionIndexToBeats (divisionIndex, numerator, denominator);
 
     if (syncEnabled && bpm > 0.0)
         p.rateHz = (float) syncedRateHz (bpm, divisionIndex, numerator, denominator);
 
-    // Host Lock requires both a valid song position and a valid tempo-derived
-    // cycle. If either is unavailable the engine falls back to Free safely.
-    if (! syncEnabled || ! p.hostPositionValid || bpm <= 0.0)
+    if (! includeHostPosition || ! syncEnabled || ! p.hostPositionValid || bpm <= 0.0)
     {
         if (p.phaseMode == phaseHostLock)
             p.phaseMode = phaseFree;
@@ -154,7 +165,7 @@ void DNAOrbitAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     for (int ch = totalNumInputChannels; ch < totalNumOutputChannels; ++ch)
         buffer.clear (ch, 0, buffer.getNumSamples());
 
-    engine.setParameters (currentParameterSnapshot());
+    engine.setParameters (currentParameterSnapshot (true));
     engine.process (buffer, totalNumInputChannels);
 }
 
@@ -173,7 +184,7 @@ void DNAOrbitAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& buf
 
         juce::AudioBuffer<float> scratchView (bypassScratchBuffer.getArrayOfWritePointers(),
                                               2, numSamples);
-        engine.setParameters (currentParameterSnapshot());
+        engine.setParameters (currentParameterSnapshot (true));
         engine.process (scratchView, totalNumInputChannels);
     }
 
