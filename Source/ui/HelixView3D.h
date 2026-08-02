@@ -15,16 +15,11 @@ namespace dnaorbit::ui
      * The 3D double-helix visualiser.
      *
      * Real 3D geometry, perspective projection, depth sorting and lighting, all
-     * rasterised through JUCE's normal 2D API - which on Windows is Direct2D and
-     * on macOS is CoreGraphics, so this is GPU-composited without ever creating an
-     * OpenGL context (and therefore without the context-loss and DAW-conflict
-     * failure modes that come with one).
-     *
-     * The helix is the true time-history of the two strands' (x, z) positions, so
-     * the DNA shape is a consequence of the physics rather than a decoration, and
-     * the running midpoint of the two strands is exactly the centre axis.
+     * rasterised through JUCE's normal 2D API. The view implements a settable
+     * tooltip so its meaning is available even though it has no direct controls.
      */
     class HelixView3D : public juce::Component,
+                        public juce::SettableTooltipClient,
                         private juce::Timer
     {
     public:
@@ -36,7 +31,6 @@ namespace dnaorbit::ui
         void visibilityChanged() override;
         void parentHierarchyChanged() override;
 
-        // --- Readouts, polled by the editor at a low rate ------------------------
         bool  isAxisLocked() const noexcept { return axisLocked; }
         float getPanA() const noexcept { return panA; }
         float getPanB() const noexcept { return panB; }
@@ -51,14 +45,6 @@ namespace dnaorbit::ui
         void updateTimerState();
         void rebuildBackground();
         void rebuildSprites();
-
-        /**
-         * Single source of truth for what a quality tier means: sets
-         * historyPoints/nodesPerStrand/glowBudget/targetFps together, so the
-         * tier NUMBER and the geometry counts it gates can never drift apart -
-         * unlike having resized()'s forced downgrade and paint()'s measured
-         * transitions each hand-write the same three tiers separately.
-         */
         void applyQualityTier (int tier);
 
         struct Quad
@@ -72,19 +58,23 @@ namespace dnaorbit::ui
         dnaorbit::dsp::HelixEngine& engine;
         HelixHistory history;
 
-        // --- Cached, size-dependent resources ------------------------------------
         juce::Image background;
         SpriteLadder ladderA, ladderB;
         juce::Image glowA, glowB, glowCentre, glowDrift;
         Projection3D::Fit fit;
         double nodeDiameterNear = 20.0;
 
-        // --- Per-frame geometry, reused so paint() never allocates ----------------
         static constexpr int numBuckets = 24;
         std::array<juce::Path, (size_t) numBuckets> strandPathsA, strandPathsB, rungPaths;
         juce::Path centreLinePath;
 
-        struct NodeDraw { juce::Point<float> position; double depth01; double scale; bool strandB; };
+        struct NodeDraw
+        {
+            juce::Point<float> position;
+            double depth01;
+            double scale;
+            bool strandB;
+        };
         std::vector<NodeDraw> nodes;
 
         int historyPoints = HelixHistory::size;
@@ -92,16 +82,13 @@ namespace dnaorbit::ui
         int glowBudget = 5;
         int targetFps = 45;
 
-        // Adaptive quality: measured, not guessed.
         double paintTimeEmaMs = 0.0;
         int framesOverBudget = 0;
         int framesUnderBudget = 0;
         int qualityTier = 0;
 
-        // Smoothed on the UI side so the audio thread stays cheap.
         float smoothedRms = 0.0f;
 
-        // Readout state.
         bool  axisLocked = true;
         int   lockHoldFrames = 0;
         float panA = 0.0f, panB = 0.0f, centroidX = 0.0f;
