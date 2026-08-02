@@ -2,29 +2,54 @@
 
 namespace dnaorbit::dsp
 {
+    namespace
+    {
+        float sanitizeParam (float value, float fallback) noexcept
+        {
+            return std::isfinite (value) ? value : fallback;
+        }
+
+        float interpolate (float a, float b, float amount) noexcept
+        {
+            return a + (b - a) * amount;
+        }
+
+        double positiveFmod (double value, double modulus) noexcept
+        {
+            double result = std::fmod (value, modulus);
+            if (result < 0.0)
+                result += modulus;
+            return result;
+        }
+    }
+
     void HelixEngine::prepare (double newSampleRate, int maximumBlockSize, int /*maxChannelsHint*/)
     {
         sampleRate = newSampleRate > 0.0 ? newSampleRate : 44100.0;
+        constexpr double standardSmoothing = 0.05;
+        constexpr double nullCoreSmoothing = 0.12;
 
-        const double smoothParamSeconds = 0.05;   // 50 ms for standard parameters
-        const double nullCoreSeconds    = 0.12;   // 120 ms mode-switch crossfade
+        radiusSmoothed.reset (sampleRate, standardSmoothing);
+        depthSmoothed.reset (sampleRate, standardSmoothing);
+        symmetrySmoothed.reset (sampleRate, standardSmoothing);
+        twistSmoothed.reset (sampleRate, standardSmoothing);
+        coreSmoothed.reset (sampleRate, standardSmoothing);
+        mixSmoothed.reset (sampleRate, standardSmoothing);
+        outputGainSmoothed.reset (sampleRate, standardSmoothing);
+        nullCoreMixSmoothed.reset (sampleRate, nullCoreSmoothing);
+        rateHzSmoothed.reset (sampleRate, standardSmoothing);
+        autoGainAmountSmoothed.reset (sampleRate, nullCoreSmoothing);
+        stereoPreserveSmoothed.reset (sampleRate, standardSmoothing);
+        softBypassSmoothed.reset (sampleRate, softBypassSeconds);
+        bassAnchorSmoothed.reset (sampleRate, standardSmoothing);
+        characterSmoothed.reset (sampleRate, standardSmoothing);
 
-        radiusSmoothed.reset (sampleRate, smoothParamSeconds);
-        depthSmoothed.reset (sampleRate, smoothParamSeconds);
-        symmetrySmoothed.reset (sampleRate, smoothParamSeconds);
-        twistSmoothed.reset (sampleRate, smoothParamSeconds);
-        coreSmoothed.reset (sampleRate, smoothParamSeconds);
-        mixSmoothed.reset (sampleRate, smoothParamSeconds);
-        outputGainSmoothed.reset (sampleRate, smoothParamSeconds);
-        nullCoreMixSmoothed.reset (sampleRate, nullCoreSeconds);
-        rateHzSmoothed.reset (sampleRate, smoothParamSeconds);
-        autoGainAmountSmoothed.reset (sampleRate, nullCoreSeconds);
-
+        crossoverL.prepare (sampleRate);
+        crossoverR.prepare (sampleRate);
         lowPassA.prepare (sampleRate);
         lowPassB.prepare (sampleRate);
 
-        // Enough headroom for max back-delay (8ms) + max twist (20ms) + margin.
-        const auto maxDelaySamples = (int) std::ceil (0.06 * sampleRate) + 16;
+        const auto maxDelaySamples = (int) std::ceil (0.08 * sampleRate) + 16;
         delayA.setMaximumDelayInSamples (maxDelaySamples);
         delayB.setMaximumDelayInSamples (maxDelaySamples);
         maxDelaySamplesStored = (float) maxDelaySamples;
@@ -34,7 +59,7 @@ namespace dnaorbit::dsp
         delayB.prepare (spec);
 
         resyncSamplesTotal = juce::jmax (1, (int) std::round (resyncDurationSeconds * sampleRate));
-
+        hostCorrectionSamplesTotal = juce::jmax (1, (int) std::round (hostCorrectionSeconds * sampleRate));
         isPrepared = true;
         reset();
     }
@@ -47,7 +72,17 @@ namespace dnaorbit::dsp
         symmetryLocked = true;
         resyncStartError = 0.0;
         resyncSamplesRemaining = 0;
+        dryWetCorrelationEstimate = 0.0f;
+        hostLockWasActive = false;
+        expectedNextHostPhaseA = 0.0;
+        expectedNextHostPhaseB = orbitmath::pi;
+        hostCorrectionStartA = 0.0;
+        hostCorrectionStartB = 0.0;
+        hostCorrectionSamplesRemaining = 0;
+        controlSamplesRemaining = 0;
 
+        crossoverL.reset();
+        crossoverR.reset();
         lowPassA.reset();
         lowPassB.reset();
         delayA.reset();
@@ -63,6 +98,10 @@ namespace dnaorbit::dsp
         nullCoreMixSmoothed.setCurrentAndTargetValue (nullCoreMixSmoothed.getCurrentValue());
         rateHzSmoothed.setCurrentAndTargetValue (rateHzSmoothed.getCurrentValue());
         autoGainAmountSmoothed.setCurrentAndTargetValue (autoGainAmountSmoothed.getCurrentValue());
+        stereoPreserveSmoothed.setCurrentAndTargetValue (stereoPreserveSmoothed.getCurrentValue());
+        softBypassSmoothed.setCurrentAndTargetValue (softBypassSmoothed.getCurrentValue());
+        bassAnchorSmoothed.setCurrentAndTargetValue (bassAnchorSmoothed.getCurrentValue());
+        characterSmoothed.setCurrentAndTargetValue (characterSmoothed.getCurrentValue());
 
         uiThetaA.store (0.0f, std::memory_order_relaxed);
         uiThetaB.store ((float) orbitmath::pi, std::memory_order_relaxed);
@@ -73,22 +112,7 @@ namespace dnaorbit::dsp
         uiCorrelation.store (1.0f, std::memory_order_relaxed);
         uiPhaseA.store (0.0, std::memory_order_relaxed);
         uiPhi.store ((float) orbitmath::pi, std::memory_order_relaxed);
-    }
-
-    namespace
-    {
-        /**
-         * Falls back to a safe default for any non-finite value. A host that
-         * ever automates a parameter to NaN/Inf (malformed automation data, a
-         * buggy upstream plugin corrupting shared state, etc.) would otherwise
-         * latch thetaA/thetaB - which depend only on rateHz, not audio - to
-         * NaN permanently, since nothing else in the engine would ever
-         * overwrite them back to a finite value.
-         */
-        float sanitizeParam (float value, float fallback) noexcept
-        {
-            return std::isfinite (value) ? value : fallback;
-        }
+        uiHostPhaseLocked.store (false, std::memory_order_relaxed);
     }
 
     void HelixEngine::setParameters (const Parameters& p) noexcept
@@ -103,64 +127,57 @@ namespace dnaorbit::dsp
 
     void HelixEngine::applyParameters (const Parameters& p, bool snapImmediately) noexcept
     {
-        const float rateHz     = sanitizeParam (p.rateHz, 0.12f);
-        const float radius01   = sanitizeParam (p.radius01, 0.8f);
-        const float depth01    = sanitizeParam (p.depth01, 0.55f);
-        const float symmetry01 = sanitizeParam (p.symmetry01, 1.0f);
-        const float twistMs    = sanitizeParam (p.twistMs, 5.0f);
-        const float core01     = sanitizeParam (p.core01, 0.0f);
-        const float mix01      = sanitizeParam (p.mix01, 0.35f);
-        const float outputDb   = sanitizeParam (p.outputDb, 0.0f);
+        const float rateHz = std::clamp (sanitizeParam (p.rateHz, 0.12f), 0.0f, 20.0f);
+        const float radius = std::clamp (sanitizeParam (p.radius01, 0.8f), 0.0f, 1.0f);
+        const float depth = std::clamp (sanitizeParam (p.depth01, 0.55f), 0.0f, 1.0f);
+        const float symmetry = std::clamp (sanitizeParam (p.symmetry01, 1.0f), 0.0f, 1.0f);
+        const float twist = std::clamp (sanitizeParam (p.twistMs, 5.0f), 0.0f, 20.0f);
+        const float core = std::clamp (sanitizeParam (p.core01, 0.0f), 0.0f, 1.0f);
+        const float mix = std::clamp (sanitizeParam (p.mix01, 0.35f), 0.0f, 1.0f);
+        const float outputGain = dbToGain (std::clamp (sanitizeParam (p.outputDb, 0.0f), -60.0f, 24.0f));
+        const float preserve = std::clamp (sanitizeParam (p.stereoPreserve01, 0.0f), 0.0f, 1.0f);
+        const float anchor = std::clamp (sanitizeParam (p.bassAnchorHz, 20.0f), 20.0f, 500.0f);
+        const float character = std::clamp ((float) p.character, 0.0f, 2.0f);
 
-        nullCoreTarget = p.nullCore;
-
-        const float autoGainAmount = p.autoGain ? 1.0f : 0.0f;
-        const float nullCoreAmount = p.nullCore ? 1.0f : 0.0f;
-        const float outputGain = dbToGain (outputDb);
-
-        if (snapImmediately)
+        auto set = [snapImmediately] (auto& smoother, float value)
         {
-            // Called once right after prepare(): every SmoothedValue defaults to
-            // a current value of 0, so without this every parameter - including
-            // Output and Mix - would audibly ramp in from silence over the
-            // first 50-120ms after every prepareToPlay() (plugin load, sample
-            // rate change), regardless of what the host had them set to.
-            rateHzSmoothed.setCurrentAndTargetValue (rateHz);
-            autoGainAmountSmoothed.setCurrentAndTargetValue (autoGainAmount);
-            radiusSmoothed.setCurrentAndTargetValue (radius01);
-            depthSmoothed.setCurrentAndTargetValue (depth01);
-            symmetrySmoothed.setCurrentAndTargetValue (symmetry01);
-            twistSmoothed.setCurrentAndTargetValue (twistMs);
-            coreSmoothed.setCurrentAndTargetValue (core01);
-            mixSmoothed.setCurrentAndTargetValue (mix01);
-            outputGainSmoothed.setCurrentAndTargetValue (outputGain);
-            nullCoreMixSmoothed.setCurrentAndTargetValue (nullCoreAmount);
-        }
-        else
-        {
-            rateHzSmoothed.setTargetValue (rateHz);
-            autoGainAmountSmoothed.setTargetValue (autoGainAmount);
-            radiusSmoothed.setTargetValue (radius01);
-            depthSmoothed.setTargetValue (depth01);
-            symmetrySmoothed.setTargetValue (symmetry01);
-            twistSmoothed.setTargetValue (twistMs);
-            coreSmoothed.setTargetValue (core01);
-            mixSmoothed.setTargetValue (mix01);
-            outputGainSmoothed.setTargetValue (outputGain);
-            nullCoreMixSmoothed.setTargetValue (nullCoreAmount);
-        }
+            if (snapImmediately)
+                smoother.setCurrentAndTargetValue (value);
+            else
+                smoother.setTargetValue (value);
+        };
+
+        set (rateHzSmoothed, rateHz);
+        set (radiusSmoothed, radius);
+        set (depthSmoothed, depth);
+        set (symmetrySmoothed, symmetry);
+        set (twistSmoothed, twist);
+        set (coreSmoothed, core);
+        set (mixSmoothed, mix);
+        set (outputGainSmoothed, outputGain);
+        set (autoGainAmountSmoothed, p.autoGain ? 1.0f : 0.0f);
+        set (nullCoreMixSmoothed, p.nullCore ? 1.0f : 0.0f);
+        set (stereoPreserveSmoothed, preserve);
+        set (softBypassSmoothed, p.softBypass ? 1.0f : 0.0f);
+        set (bassAnchorSmoothed, anchor);
+        set (characterSmoothed, character);
+
+        phaseModeTarget = std::clamp (p.phaseMode, 0, 2);
+        startPhaseDegreesTarget = std::clamp (sanitizeParam (p.startPhaseDegrees, 0.0f), 0.0f, 360.0f);
+        reverseDirectionTarget = p.reverseDirection;
+        transportPlayingTarget = p.transportPlaying;
+        transportJustStartedTarget = p.transportJustStarted;
+        hostPositionValidTarget = p.hostPositionValid && std::isfinite (p.hostPpqPosition);
+        hostPpqPositionTarget = hostPositionValidTarget ? p.hostPpqPosition : 0.0;
+        cycleBeatsTarget = std::isfinite (p.cycleBeats) && p.cycleBeats > 0.0 ? p.cycleBeats : 4.0;
 
         uiNullCoreOn.store (p.nullCore, std::memory_order_relaxed);
+        uiBassAnchorHz.store (anchor, std::memory_order_relaxed);
     }
 
     void HelixEngine::process (juce::AudioBuffer<float>& buffer, int numInputChannels) noexcept
     {
-        // A host that violates the prepare-before-process contract would
-        // otherwise hit the delay lines' zero-channel internal buffer - see the
-        // comment on process() in the header. Leaving the buffer untouched
-        // here behaves like a pass-through, which is a safe fallback for a
-        // situation that should never occur in the first place.
-        if (! isPrepared)
+        if (! isPrepared || buffer.getNumChannels() < 2)
             return;
 
         const int numSamples = buffer.getNumSamples();
@@ -170,45 +187,141 @@ namespace dnaorbit::dsp
         const float* inL = buffer.getReadPointer (0);
         const float* inR = stereoIn ? buffer.getReadPointer (1) : nullptr;
 
-        // Block accumulators for the UI meters (computed on the output).
+        const double directionSign = reverseDirectionTarget ? -1.0 : 1.0;
+        const double startRadians = (double) startPhaseDegreesTarget * orbitmath::pi / 180.0;
+        const bool useHostLock = phaseModeTarget == 2 && hostPositionValidTarget && cycleBeatsTarget > 0.0;
+        const bool retriggerNow = phaseModeTarget == 1 && transportJustStartedTarget;
+        const double hostRate = (double) rateHzSmoothed.getTargetValue();
+        const double hostIncrement = transportPlayingTarget
+            ? orbitmath::angularIncrement (hostRate, sampleRate)
+            : 0.0;
+        const double hostPpqCycles = hostPpqPositionTarget / cycleBeatsTarget;
+        const double hostRawStartA = startRadians + directionSign * orbitmath::twoPi * hostPpqCycles;
+        const double hostBlockPhaseA = orbitmath::wrapTwoPi (hostRawStartA);
+
+        const float targetSymmetry = symmetrySmoothed.getTargetValue();
+        const bool targetLocked = targetSymmetry >= (float) symmetryLockThreshold;
+        const double targetDiff = orbitmath::rateDifferenceFactor ((double) targetSymmetry, maxRateDifference);
+        const double targetBScale = targetLocked ? 1.0 : 1.0 + targetDiff;
+        const double hostRawStartB = startRadians + orbitmath::pi
+                                   + directionSign * orbitmath::twoPi * hostPpqCycles * targetBScale;
+        const double hostBlockPhaseB = orbitmath::wrapTwoPi (hostRawStartB);
+
+        if (useHostLock)
+        {
+            if (! hostLockWasActive || transportJustStartedTarget)
+            {
+                thetaA = hostBlockPhaseA;
+                thetaB = hostBlockPhaseB;
+                symmetryLocked = targetLocked;
+                hostCorrectionStartA = 0.0;
+                hostCorrectionStartB = 0.0;
+                hostCorrectionSamplesRemaining = 0;
+            }
+            else
+            {
+                const double discontinuityA = std::abs (
+                    orbitmath::shortestAngleDelta (expectedNextHostPhaseA, hostBlockPhaseA));
+                const double discontinuityB = std::abs (
+                    orbitmath::shortestAngleDelta (expectedNextHostPhaseB, hostBlockPhaseB));
+                const double toleranceA = std::max (0.02, std::abs (hostIncrement) * 8.0);
+                const double toleranceB = std::max (0.02, std::abs (hostIncrement * targetBScale) * 8.0);
+
+                if (discontinuityA > toleranceA || discontinuityB > toleranceB)
+                {
+                    hostCorrectionStartA = orbitmath::shortestAngleDelta (hostBlockPhaseA, thetaA);
+                    hostCorrectionStartB = orbitmath::shortestAngleDelta (hostBlockPhaseB, thetaB);
+                    hostCorrectionSamplesRemaining = hostCorrectionSamplesTotal;
+                }
+            }
+
+            expectedNextHostPhaseA = orbitmath::wrapTwoPi (
+                hostBlockPhaseA + directionSign * hostIncrement * (double) numSamples);
+            expectedNextHostPhaseB = orbitmath::wrapTwoPi (
+                hostBlockPhaseB + directionSign * hostIncrement * targetBScale * (double) numSamples);
+            hostLockWasActive = true;
+        }
+        else
+        {
+            hostLockWasActive = false;
+            hostCorrectionSamplesRemaining = 0;
+
+            if (retriggerNow)
+            {
+                thetaA = orbitmath::wrapTwoPi (startRadians);
+                thetaB = orbitmath::wrapTwoPi (thetaA + orbitmath::pi);
+                phaseAccumA = positiveFmod (startRadians, phaseModulus);
+                symmetryLocked = true;
+                resyncSamplesRemaining = 0;
+            }
+        }
+
+        uiHostPhaseLocked.store (useHostLock, std::memory_order_relaxed);
+
         double sumLL = 0.0, sumRR = 0.0, sumLR = 0.0;
+        double sumDryPower = 0.0, sumWetPower = 0.0, sumDryWet = 0.0;
 
         for (int n = 0; n < numSamples; ++n)
         {
-            const float radius   = radiusSmoothed.getNextValue();
-            const float depth    = depthSmoothed.getNextValue();
+            const float radius = radiusSmoothed.getNextValue();
+            const float depth = depthSmoothed.getNextValue();
             const float symmetry = symmetrySmoothed.getNextValue();
-            const float twistMs  = twistSmoothed.getNextValue();
-            const float core     = coreSmoothed.getNextValue();
-            const float mix      = mixSmoothed.getNextValue();
-            const float outGain  = outputGainSmoothed.getNextValue();
+            const float twistMs = twistSmoothed.getNextValue();
+            const float core = coreSmoothed.getNextValue();
+            const float mix = mixSmoothed.getNextValue();
+            const float outGain = outputGainSmoothed.getNextValue();
             const float nullCoreAmount = nullCoreMixSmoothed.getNextValue();
-            const float rateHz   = rateHzSmoothed.getNextValue();
+            const float rateHz = rateHzSmoothed.getNextValue();
             const float autoGainAmount = autoGainAmountSmoothed.getNextValue();
+            const float stereoPreserve = stereoPreserveSmoothed.getNextValue();
+            const float softBypass = softBypassSmoothed.getNextValue();
+            const float bassAnchorHz = bassAnchorSmoothed.getNextValue();
+            const float character = characterSmoothed.getNextValue();
 
-            // Sanitized at the single point audio enters the engine: the two
-            // one-pole filters below are recursive (state depends on the
-            // previous sample), so a single non-finite input sample - a bad
-            // upstream plugin, a glitching host - would otherwise latch their
-            // state to NaN forever, with nothing downstream ever able to clear
-            // it. Substituting silence here keeps every later stage finite by
-            // induction, since reset() guarantees the filter/delay state
-            // starts finite and every operation on finite, bounded values
-            // (sin/cos/exp/clamp) stays finite.
             const float sampleInL = std::isfinite (inL[n]) ? inL[n] : 0.0f;
-            const float sampleInR = stereoIn ? (std::isfinite (inR[n]) ? inR[n] : 0.0f) : sampleInL;
-            const float wetSource = stereoIn ? 0.5f * (sampleInL + sampleInR) : sampleInL;
+            const float sampleInR = stereoIn && std::isfinite (inR[n]) ? inR[n] : sampleInL;
             const float dryL = sampleInL;
             const float dryR = sampleInR;
-
-            // --- Orbit angle update -------------------------------------------------
             const double incA = orbitmath::angularIncrement ((double) rateHz, sampleRate);
-            thetaA = orbitmath::wrapTwoPi (thetaA + incA);
-            phaseAccumA = std::fmod (phaseAccumA + incA, phaseModulus);
+            double correctionFraction = 0.0;
+
+            if (useHostLock)
+            {
+                if (hostCorrectionSamplesRemaining > 0)
+                    correctionFraction = (double) hostCorrectionSamplesRemaining
+                                       / (double) hostCorrectionSamplesTotal;
+
+                const double nominalA = orbitmath::wrapTwoPi (
+                    hostBlockPhaseA + directionSign * hostIncrement * (double) n);
+                thetaA = orbitmath::wrapTwoPi (
+                    nominalA + hostCorrectionStartA * correctionFraction);
+                phaseAccumA = positiveFmod (
+                    hostRawStartA + directionSign * hostIncrement * (double) n
+                    + hostCorrectionStartA * correctionFraction,
+                    phaseModulus);
+            }
+            else if (! (retriggerNow && n == 0))
+            {
+                thetaA = orbitmath::wrapTwoPi (thetaA + directionSign * incA);
+                phaseAccumA = positiveFmod (phaseAccumA + directionSign * incA, phaseModulus);
+            }
 
             const bool wantsLocked = symmetry >= (float) symmetryLockThreshold;
+            const bool effectiveLocked = useHostLock ? targetLocked : wantsLocked;
 
-            if (wantsLocked)
+            if (useHostLock)
+            {
+                const double nominalB = orbitmath::wrapTwoPi (
+                    hostBlockPhaseB + directionSign * hostIncrement * targetBScale * (double) n);
+                thetaB = orbitmath::wrapTwoPi (
+                    nominalB + hostCorrectionStartB * correctionFraction);
+                symmetryLocked = targetLocked;
+                resyncSamplesRemaining = 0;
+
+                if (hostCorrectionSamplesRemaining > 0)
+                    --hostCorrectionSamplesRemaining;
+            }
+            else if (wantsLocked)
             {
                 const double desired = orbitmath::wrapTwoPi (thetaA + orbitmath::pi);
 
@@ -218,19 +331,12 @@ namespace dnaorbit::dsp
                 }
                 else
                 {
-                    // Just transitioned from drifting to locked: capture the
-                    // current error once and ramp it to zero linearly over a
-                    // fixed, bounded duration (resyncSamplesTotal), so the
-                    // resync reliably completes within the target window
-                    // instead of trailing off exponentially forever.
                     if (resyncSamplesRemaining <= 0)
                     {
                         resyncStartError = orbitmath::shortestAngleDelta (thetaB, desired);
                         resyncSamplesRemaining = resyncSamplesTotal;
                     }
 
-                    // shortestAngleDelta(thetaB, desired) == desired - thetaB (shortest path), so
-                    // thetaB == desired - resyncStartError reproduces the original thetaB at fraction 1.
                     const double fraction = (double) resyncSamplesRemaining / (double) resyncSamplesTotal;
                     thetaB = orbitmath::wrapTwoPi (desired - resyncStartError * fraction);
                     --resyncSamplesRemaining;
@@ -245,122 +351,156 @@ namespace dnaorbit::dsp
             else
             {
                 symmetryLocked = false;
-                resyncSamplesRemaining = 0; // force a fresh error capture next time we relock
+                resyncSamplesRemaining = 0;
                 const double diff = orbitmath::rateDifferenceFactor ((double) symmetry, maxRateDifference);
-                const double incB = orbitmath::angularIncrement ((double) rateHz * (1.0 + diff), sampleRate);
-                thetaB = orbitmath::wrapTwoPi (thetaB + incB);
+                const double incB = orbitmath::angularIncrement (
+                    (double) rateHz * (1.0 + diff), sampleRate);
+                thetaB = orbitmath::wrapTwoPi (thetaB + directionSign * incB);
             }
 
-            // --- Strand A: position, depth cues, pan --------------------------------
-            const double backAmountA = orbitmath::backAmount (thetaA);
-            const float gainDbA = -maxBackAttenDb * (float) backAmountA * depth;
-            const float backGainA = dbToGain (gainDbA);
-            const float cutoffA = frontCutoffHz + (backCutoffHz - frontCutoffHz) * (float) backAmountA * depth;
-            lowPassA.setCutoffHz (cutoffA);
-            const float filteredA = lowPassA.processSample (wetSource * backGainA);
+            const double sinA = std::sin (thetaA);
+            const double cosA = std::cos (thetaA);
+            const double sinB = effectiveLocked ? -sinA : std::sin (thetaB);
+            const double cosB = effectiveLocked ? -cosA : std::cos (thetaB);
+            const double backAmountA = 0.5 * (1.0 - cosA);
+            const double backAmountB = 0.5 * (1.0 - cosB);
 
-            const float backDelayMsA = maxBackDelayMs * (float) backAmountA * depth;
-            const float delaySamplesA = std::clamp ((backDelayMsA * 0.001f) * (float) sampleRate, 0.0f, maxDelaySamplesStored - 1.0f);
+            const bool updateControls = controlSamplesRemaining <= 0;
+            if (updateControls)
+            {
+                crossoverL.setCutoffHz (bassAnchorHz);
+                crossoverR.setCutoffHz (bassAnchorHz);
+
+                const float c = std::clamp (character, 0.0f, 2.0f);
+                if (c <= 1.0f)
+                {
+                    cachedMaxBackAttenDb = interpolate (4.0f, 6.0f, c);
+                    cachedBackCutoffHz = interpolate (5000.0f, 8000.0f, c);
+                    cachedMaxBackDelayMs = interpolate (8.0f, 10.0f, c);
+                }
+                else
+                {
+                    const float t = c - 1.0f;
+                    cachedMaxBackAttenDb = interpolate (6.0f, 8.0f, t);
+                    cachedBackCutoffHz = interpolate (8000.0f, 3500.0f, t);
+                    cachedMaxBackDelayMs = interpolate (10.0f, 14.0f, t);
+                }
+            }
+
+            float lowL = 0.0f, highL = 0.0f, lowR = 0.0f, highR = 0.0f;
+            crossoverL.processSample (sampleInL, lowL, highL);
+            crossoverR.processSample (sampleInR, lowR, highR);
+
+            const float lowMid = stereoIn ? 0.5f * (lowL + lowR) : lowL;
+            const float mid = stereoIn ? 0.5f * (highL + highR) : highL;
+            const float side = stereoIn ? 0.5f * (highL - highR) : 0.0f;
+
+            const float backDelayMsA = cachedMaxBackDelayMs * (float) backAmountA * depth;
+            const float backDelayMsB = cachedMaxBackDelayMs * (float) backAmountB * depth;
+            const float delaySamplesA = std::clamp (
+                backDelayMsA * 0.001f * (float) sampleRate,
+                0.0f, maxDelaySamplesStored - 1.0f);
+            const float delaySamplesB = std::clamp (
+                (backDelayMsB + twistMs) * 0.001f * (float) sampleRate,
+                0.0f, maxDelaySamplesStored - 1.0f);
+
+            if (updateControls)
+            {
+                cachedBackGainA = dbToGain (-cachedMaxBackAttenDb * (float) backAmountA * depth);
+                cachedBackGainB = dbToGain (-cachedMaxBackAttenDb * (float) backAmountB * depth);
+
+                const float cutoffA = frontCutoffHz
+                    + (cachedBackCutoffHz - frontCutoffHz) * (float) backAmountA * depth;
+                const float cutoffB = frontCutoffHz
+                    + (cachedBackCutoffHz - frontCutoffHz) * (float) backAmountB * depth;
+                lowPassA.setCutoffHz (cutoffA);
+                lowPassB.setCutoffHz (cutoffB);
+
+                const float msPerSample = 1000.0f / (float) sampleRate;
+                const float delayMsA = delaySamplesA * msPerSample;
+                const float delayMsB = delaySamplesB * msPerSample;
+                auto coherence = [] (float deltaMs)
+                {
+                    return std::exp (-std::abs (deltaMs) / 4.0f);
+                };
+                cachedCoherenceAB = coherence (delayMsA - delayMsB);
+                cachedCoherenceAC = coherence (delayMsA);
+                cachedCoherenceBC = coherence (delayMsB);
+                controlSamplesRemaining = controlIntervalSamples;
+            }
+            --controlSamplesRemaining;
+
+            const float filteredA = lowPassA.processSample (mid * cachedBackGainA);
             delayA.setDelay (delaySamplesA);
             delayA.pushSample (0, filteredA);
             const float delayedA = delayA.popSample (0);
-
-            const double panA = radius * std::sin (thetaA);
-            const auto gainsA = orbitmath::equalPowerPan (panA);
+            const auto gainsA = orbitmath::equalPowerPan (radius * sinA);
             const float strandAL = delayedA * (float) gainsA.left * strandGain;
             const float strandAR = delayedA * (float) gainsA.right * strandGain;
 
-            // --- Strand B: position, depth cues, twist decorrelation, pan -----------
-            const double backAmountB = orbitmath::backAmount (thetaB);
-            const float gainDbB = -maxBackAttenDb * (float) backAmountB * depth;
-            const float backGainB = dbToGain (gainDbB);
-            const float cutoffB = frontCutoffHz + (backCutoffHz - frontCutoffHz) * (float) backAmountB * depth;
-            lowPassB.setCutoffHz (cutoffB);
-            const float filteredB = lowPassB.processSample (wetSource * backGainB);
-
-            const float backDelayMsB = maxBackDelayMs * (float) backAmountB * depth;
-            const float delaySamplesB = std::clamp (((backDelayMsB + twistMs) * 0.001f) * (float) sampleRate, 0.0f, maxDelaySamplesStored - 1.0f);
+            const float filteredB = lowPassB.processSample (mid * cachedBackGainB);
             delayB.setDelay (delaySamplesB);
             delayB.pushSample (0, filteredB);
             const float delayedB = delayB.popSample (0);
-
-            const double panB = radius * std::sin (thetaB);
-            const auto gainsB = orbitmath::equalPowerPan (panB);
+            const auto gainsB = orbitmath::equalPowerPan (radius * sinB);
             const float strandBL = delayedB * (float) gainsB.left * strandGain;
             const float strandBR = delayedB * (float) gainsB.right * strandGain;
 
-            // --- Wet sum, Core, NULL CORE --------------------------------------------
-            float wetL = strandAL + strandBL;
-            float wetR = strandAR + strandBR;
+            float wetL = strandAL + strandBL + mid * core;
+            float wetR = strandAR + strandBR + mid * core;
 
-            const float coreSignal = wetSource * core;
-            wetL += coreSignal;
-            wetR += coreSignal;
-
-            const auto nulled = nullCoreProcess (wetL, wetR);
-            wetL += (nulled.left  - wetL) * nullCoreAmount;
-            wetR += (nulled.right - wetR) * nullCoreAmount;
-
-            // --- Wet level matching ---------------------------------------------------
-            // Deterministic (not signal-following, so it cannot pump): predict the
-            // wet path's gain purely from the current geometry and cancel it, so
-            // moving Mix does not change the perceived loudness.
-            //
-            // Each channel carries three copies of the same source at different
-            // delays: strand A (delayed dA), strand B (delayed dB) and the Core
-            // signal (undelayed). Copies at a similar delay add in AMPLITUDE;
-            // once their delays differ by more than a few ms they add in POWER.
-            // So sum the powers plus the pairwise cross terms, each weighted by a
-            // coherence factor from that pair's delay difference:
-            //
-            //   P = SUM(gi^2) + 2 * SUM over i<j of gi*gj*coherence(|di - dj|)
-            //
-            // Getting the Core cross terms right matters: Core is undelayed, so it
-            // sums coherently with whichever strand is currently near zero delay.
-            const float msPerSample = 1000.0f / (float) sampleRate;
-            const auto coherence = [] (float deltaMs) { return std::exp (-std::abs (deltaMs) / 4.0f); };
-
-            const float delayMsA = delaySamplesA * msPerSample;
-            const float delayMsB = delaySamplesB * msPerSample;
-            const float cAB = coherence (delayMsA - delayMsB);
-            const float cAC = coherence (delayMsA);   // strand A against the undelayed Core
-            const float cBC = coherence (delayMsB);   // strand B against the undelayed Core
-
-            const float aL = strandGain * backGainA * (float) gainsA.left;
-            const float aR = strandGain * backGainA * (float) gainsA.right;
-            const float bL = strandGain * backGainB * (float) gainsB.left;
-            const float bR = strandGain * backGainB * (float) gainsB.right;
-
+            const float aL = strandGain * cachedBackGainA * (float) gainsA.left;
+            const float aR = strandGain * cachedBackGainA * (float) gainsA.right;
+            const float bL = strandGain * cachedBackGainB * (float) gainsB.left;
+            const float bR = strandGain * cachedBackGainB * (float) gainsB.right;
             const float powerL = aL * aL + bL * bL + core * core
-                               + 2.0f * (aL * bL * cAB + aL * core * cAC + bL * core * cBC);
+                               + 2.0f * (aL * bL * cachedCoherenceAB
+                                       + aL * core * cachedCoherenceAC
+                                       + bL * core * cachedCoherenceBC);
             const float powerR = aR * aR + bR * bR + core * core
-                               + 2.0f * (aR * bR * cAB + aR * core * cAC + bR * core * cBC);
+                               + 2.0f * (aR * bR * cachedCoherenceAB
+                                       + aR * core * cachedCoherenceAC
+                                       + bR * core * cachedCoherenceBC);
 
-            // Reference: a coherent unit input has dry power 1^2 + 1^2 = 2 across the pair.
             const float wetPower = powerL + powerR;
             const float makeupTarget = wetPower > 1.0e-9f
-                                     ? std::clamp (std::sqrt (2.0f / wetPower), 1.0f / maxWetMakeupGain, maxWetMakeupGain)
-                                     : 1.0f;
-
-            // NULL CORE is deliberately NOT compensated: that mode is meant to be able
-            // to almost vanish in mono, and for near-mono material the required boost
-            // would be unbounded. The clamp above is the safety net.
+                ? std::clamp (std::sqrt (2.0f / wetPower),
+                              1.0f / maxWetMakeupGain, maxWetMakeupGain)
+                : 1.0f;
             const float wetMakeup = 1.0f + (makeupTarget - 1.0f) * autoGainAmount;
             wetL *= wetMakeup;
             wetR *= wetMakeup;
 
-            // --- Dry/Wet mix, output gain ---------------------------------------------
-            const auto dryWet = equalPowerMix (mix);
-            float finalL = dryWet.dry * dryL + dryWet.wet * wetL;
-            float finalR = dryWet.dry * dryR + dryWet.wet * wetR;
+            wetL += lowMid;
+            wetR += lowMid;
+            const float sideBed = side * stereoPreserve;
+            wetL += sideBed;
+            wetR -= sideBed;
 
-            finalL *= outGain;
-            finalR *= outGain;
+            const auto nulled = nullCoreProcess (wetL, wetR);
+            wetL += (nulled.left - wetL) * nullCoreAmount;
+            wetR += (nulled.right - wetR) * nullCoreAmount;
+
+            sumDryPower += (double) dryL * dryL + (double) dryR * dryR;
+            sumWetPower += (double) wetL * wetL + (double) wetR * wetR;
+            sumDryWet += (double) dryL * wetL + (double) dryR * wetR;
+
+            const auto dryWet = equalPowerMix (mix);
+            const float predictedPower = std::clamp (
+                dryWet.dry * dryWet.dry + dryWet.wet * dryWet.wet
+                    + 2.0f * dryWetCorrelationEstimate * dryWet.dry * dryWet.wet,
+                minMixPredictedPower, maxMixPredictedPower);
+            const float mixNormTarget = 1.0f / std::sqrt (predictedPower);
+            const float mixNorm = 1.0f + (mixNormTarget - 1.0f) * autoGainAmount;
+
+            const float processedL = (dryWet.dry * dryL + dryWet.wet * wetL) * mixNorm * outGain;
+            const float processedR = (dryWet.dry * dryR + dryWet.wet * wetR) * mixNorm * outGain;
+            float finalL = processedL + (dryL - processedL) * softBypass;
+            float finalR = processedR + (dryR - processedR) * softBypass;
 
             constexpr float antiDenormal = 1.0e-20f;
             finalL += antiDenormal; finalL -= antiDenormal;
             finalR += antiDenormal; finalR -= antiDenormal;
-
             outL[n] = finalL;
             outR[n] = finalR;
 
@@ -373,7 +513,6 @@ namespace dnaorbit::dsp
                 const auto posA = orbitmath::computePosition (thetaA, radius);
                 const auto posB = orbitmath::computePosition (thetaB, radius);
                 const auto centroid = orbitmath::computeCentroid (posA, posB);
-
                 uiThetaA.store ((float) thetaA, std::memory_order_relaxed);
                 uiThetaB.store ((float) thetaB, std::memory_order_relaxed);
                 uiRadius.store (radius, std::memory_order_relaxed);
@@ -382,27 +521,40 @@ namespace dnaorbit::dsp
                 uiCentroidDistance.store ((float) centroid.distance, std::memory_order_relaxed);
                 uiSymmetry.store (symmetry, std::memory_order_relaxed);
                 uiPhaseA.store (phaseAccumA, std::memory_order_relaxed);
-                uiPhi.store ((float) orbitmath::wrapTwoPi (thetaB - thetaA), std::memory_order_relaxed);
+                uiPhi.store ((float) orbitmath::wrapTwoPi (thetaB - thetaA),
+                             std::memory_order_relaxed);
+                uiBassAnchorHz.store (bassAnchorHz, std::memory_order_relaxed);
             }
         }
 
-        // --- Publish meters for the UI (once per block) ------------------------------
         if (numSamples > 0)
         {
+            const double blockSeconds = (double) numSamples / sampleRate;
+            const float correlationAlpha = (float) (1.0 - std::exp (
+                -blockSeconds / mixCorrelationTimeSeconds));
+            float measuredDryWet = 0.0f;
+            const double dryWetDenom = std::sqrt (sumDryPower * sumWetPower);
+            if (dryWetDenom > 1.0e-12)
+                measuredDryWet = (float) std::clamp (sumDryWet / dryWetDenom, -1.0, 1.0);
+
+            dryWetCorrelationEstimate += correlationAlpha
+                                       * (measuredDryWet - dryWetCorrelationEstimate);
+            if (! std::isfinite (dryWetCorrelationEstimate))
+                dryWetCorrelationEstimate = 0.0f;
+
             const double invN = 1.0 / (double) numSamples;
             const double meanLL = sumLL * invN;
             const double meanRR = sumRR * invN;
-
             const float rms = (float) std::sqrt (0.5 * (meanLL + meanRR));
-            uiOutputRms.store (std::isfinite (rms) ? rms : 0.0f, std::memory_order_relaxed);
+            uiOutputRms.store (std::isfinite (rms) ? rms : 0.0f,
+                               std::memory_order_relaxed);
 
-            // Normalised L/R correlation: +1 mono, 0 uncorrelated, -1 out of phase.
-            // Undefined for silence, so hold at +1 (mono-safe) rather than dividing by zero.
             const double denom = std::sqrt (meanLL * meanRR);
             const float correlation = denom > 1.0e-12
-                                     ? (float) std::clamp ((sumLR * invN) / denom, -1.0, 1.0)
-                                     : 1.0f;
-            uiCorrelation.store (std::isfinite (correlation) ? correlation : 1.0f, std::memory_order_relaxed);
+                ? (float) std::clamp ((sumLR * invN) / denom, -1.0, 1.0)
+                : 1.0f;
+            uiCorrelation.store (std::isfinite (correlation) ? correlation : 1.0f,
+                                 std::memory_order_relaxed);
         }
     }
 
@@ -416,6 +568,8 @@ namespace dnaorbit::dsp
         state.centroidZ = uiCentroidZ.load (std::memory_order_relaxed);
         state.centroidDistance = uiCentroidDistance.load (std::memory_order_relaxed);
         state.nullCoreOn = uiNullCoreOn.load (std::memory_order_relaxed);
+        state.hostPhaseLocked = uiHostPhaseLocked.load (std::memory_order_relaxed);
+        state.bassAnchorHz = uiBassAnchorHz.load (std::memory_order_relaxed);
         state.symmetry01 = uiSymmetry.load (std::memory_order_relaxed);
         state.outputRms = uiOutputRms.load (std::memory_order_relaxed);
         state.correlation = uiCorrelation.load (std::memory_order_relaxed);

@@ -1,387 +1,324 @@
 # DNA Orbit
 
-A DNA-shaped spatial effect plugin. Two copies of the input signal ("strands")
-orbit a shared centre axis on opposite sides, like the two strands of a DNA
-helix rotating together. Left/right panning is combined with amplitude,
-high-frequency, and micro-delay cues to fake a front/back circular motion on
-top of ordinary stereo — it is not a simple auto-panner.
+DNA Orbit is a DNA-shaped stereo motion effect. Two copies of the **Mid**
+content orbit a shared centre axis on opposite sides, while the source's
+original **Side** content can remain as a stable stereo bed around them.
+Amplitude, spectral and micro-delay cues create front/back movement in
+ordinary stereo without requiring a binaural or Atmos renderer.
 
-- **C++20 / JUCE 8.0.15 / CMake**
-- Formats: **VST3**, **Audio Unit** (macOS only), **Standalone**
-- Plugin name: **DNA Orbit** — internal code `DnaO` — manufacturer **Flower Pot Studio**
+- C++20 / JUCE 8.0.15 / CMake
+- VST3 / Audio Unit on macOS / Standalone
+- Product: DNA Orbit
+- Manufacturer: Flower Pot Studio
 
-## 1. What it does
+> This commercial-upgrade branch is still a draft. Its newest changes must be
+> compiled, tested and auditioned locally before merge.
 
-Each strand's position is:
+## Product signal model
 
-```
-xA = radius * sin(thetaA)      // left/right
-zA = cos(thetaA)                // front/back
-xB = radius * sin(thetaB)
-zB = cos(thetaB)
-```
-
-In the default, fully symmetric state, `thetaB = thetaA + pi`, so the two
-strands sit on exactly opposite sides of the shared axis and rotate together
-at the same speed. Their **spatial centroid** — `((xA+xB)/2, (zA+zB)/2)` —
-stays at the origin.
-
-Important: **"centre = 0" describes the spatial centre of gravity of the two
-strands, not silence.** DNA Orbit never cancels the signal in its normal
-mode. Both strands keep the source's normal polarity at all times in HELIX
-mode; polarity inversion is never used to create the "empty centre" effect.
-
-## 2. HELIX vs. NULL CORE
-
-| | HELIX (default) | NULL CORE (experimental) |
-|---|---|---|
-| Default state | **ON** (always active) | **OFF** |
-| What it does | Places the two strands symmetrically; keeps normal polarity | Zeroes the **Mid** component of the **Wet** signal only (`Mid = 0`, output = Side only) |
-| Mono safety | Safe — does not collapse to silence when summed to mono | **Not safe** — the processed (Wet) signal can nearly disappear in mono |
-| Applies to | Dry and Wet | **Wet only.** Dry is always left untouched |
-| Intended use | Everyday music production | Deliberate, occasional sound-design effect |
-
-When NULL CORE is switched on, the UI shows a persistent red warning —
-**「NULL CORE — モノラルで消える可能性があります」** — and the toggle itself is
-red. The warning tracks the *parameter*, so it stays correct under host
-automation and preset loads, not just UI clicks. Switching NULL CORE on/off
-crossfades over ~120 ms to avoid clicks. The **Core** knob (adds a centred copy of the source into the Wet
-signal) has no audible effect while NULL CORE is on, since NULL CORE removes
-exactly the Mid content Core would add — this is expected, not a bug.
-
-## 3. The interface
-
-The window is split into a 基本 (Basic) tab and a 詳細 (Detail) tab, with the
-3D visualiser always visible between them. UI text is Japanese.
-
-**基本 (Basic)** — four knobs only, plus action-named presets:
-
-| Label | Parameter | Meaning |
-|---|---|---|
-| 速さ | `rate` | How long one revolution takes |
-| 広がり | `radius` | Left/right spread |
-| 立体感 | `depth` | Front/back depth |
-| 効果量 | `mix` | Blend against the dry signal |
-
-Presets are named after what they do rather than what they are — 
-ボーカルを広げる / パッドを回す / ギターに揺らぎ / シンセを速く回す /
-実験:中心を消す — so the plugin is usable before touching a knob.
-
-**詳細 (Detail)** — テンポ同期 + 分割, 対称性, ねじれ, 中心の芯, 出力,
-音量自動補正, and NULL CORE (marked in red). Every control has a Japanese
-tooltip.
-
-### The 3D visualiser
-
-The double helix is **not decoration: it is the true time-history of the two
-strands' (x, z) positions.** The vertical axis is time, x is pan, z is
-front/back depth. Two antipodal points rotating over time trace a double helix
-as a matter of geometry, so the DNA shape falls out of the actual physics.
-It reuses the same `OrbitMath` functions the audio path uses.
-
-This makes the "+/- rotating, centre = 0" behaviour directly visible:
-
-- The **centre line** is the running midpoint of the two strands, drawn over a
-  dead-straight reference axis. At Symmetry 100% it sits exactly on that
-  reference; below 100% it visibly waves off it and turns orange.
-- The **readout** shows the physics literally — e.g. `A +0.069 / B -0.069 /
-  中心 0.0000` when locked, versus `A -0.247 / B -0.797 / 中心 -0.5223` with
-  103° of phase error when drifting.
-- The **top-down inset** shows the true instantaneous orbit (an ellipse, since
-  only x is scaled by Radius) with A and B antipodal, plus a trail of the
-  centroid's wander.
-
-Rendering is real 3D geometry — perspective projection, per-segment depth
-sorting, shaded sphere sprites with specular and rim lighting — rasterised
-through JUCE's normal 2D API. That means Direct2D on Windows and CoreGraphics
-on macOS, i.e. GPU-composited, **without ever creating an OpenGL context** and
-so without the context-loss and DAW-conflict failures that come with one.
-Frame cost is measured at runtime and quality steps down automatically if it
-exceeds budget.
-
-## 4. Parameters
-
-| Parameter | ID | Range | Default | Notes |
-|---|---|---|---|---|
-| Rate | `rate` | 0.02 – 4.0 Hz | 0.12 Hz | Orbit speed (log-skewed). Displayed as seconds-per-revolution (`8.33秒/周`), which is far more intuitive for a slow orbit than Hz |
-| Sync | `sync` | on/off | off | When on, Rate is derived from host tempo + Division |
-| Sync Division | `division` | 4 bars / 2 bars / 1 bar / 1/2 / 1/4 / 1/8 | 1 bar | Cycle length in beats when Sync is on |
-| Radius | `radius` | 0 – 100% | 80% | Left/right spread of both strands |
-| Depth | `depth` | 0 – 100% | 55% | Strength of the front/back cues (gain, filtering, delay) |
-| Symmetry | `symmetry` | 0 – 100% | 100% | 100% = centroid locked exactly at the origin. Below 100%, Strand B's rate differs slightly and the centroid drifts |
-| Twist | `twist` | 0 – 20 ms | 5 ms | Extra delay on Strand B only, for decorrelation between the two strands |
-| Core | `core` | 0 – 100% | 0% | Adds a centred copy of the source into the Wet signal |
-| Null Core | `nullCore` | on/off | **off** | See section 2 above |
-| Mix | `mix` | 0 – 100% | 35% | Equal-power Dry/Wet |
-| Output | `output` | -12 – +6 dB | 0 dB | Final output trim |
-| Auto Gain | `autoGain` | on/off | **on** | Level-matches Wet to Dry so moving Mix does not change perceived loudness |
-
-When host tempo is unavailable while Sync is on, the plugin falls back
-safely to the free-running Rate knob rather than guessing a tempo.
-
-### Presets
-
-Selectable from the プリセット menu in the 基本 tab. They set the parameters
-directly; the values are then saved with the project like any other setting.
-
-| Preset | Rate | Radius | Depth | Symmetry | Twist | Core | Mix | Null Core |
-|---|---|---|---|---|---|---|---|---|
-| ボーカルを広げる | 0.10 Hz | 75% | 45% | 100% | 4 ms | 10% | 30% | off |
-| パッドを回す | 0.18 Hz | 100% | 65% | 100% | 7 ms | 10% | 45% | off |
-| ギターに揺らぎ | 0.08 Hz | 80% | 60% | 88% | 6 ms | 15% | 40% | off |
-| シンセを速く回す | 0.60 Hz | 90% | 70% | 100% | 8 ms | 0% | 40% | off |
-| 実験:中心を消す | 0.04 Hz | 100% | 50% | 100% | 8 ms | 0% | 30% | **on** |
-
-### Level matching (Auto Gain)
-
-Measured, the raw wet path sits about **7 dB below dry** at defaults (about
-10 dB for wide stereo input) and swings to roughly **+4 dB** at Core 100%, so
-raising Mix used to lower the perceived level and made A/B comparison
-misleading.
-
-Auto Gain (on by default) cancels this with a gain derived purely from the
-current geometry — it is **deterministic, not an RMS follower, so it cannot
-pump**. Each channel carries three copies of the source at different delays
-(strand A, strand B, and the undelayed Core), so the estimate sums their
-powers plus the pairwise cross terms, weighted by a coherence factor from each
-pair's delay difference.
-
-Measured result across an 81-point radius/depth/twist/core sweep: worst
-deviation **-1.20 dB**; a tonal source lands at **-0.18 dB**. Two deliberate
-exceptions, both documented rather than papered over:
-
-- **NULL CORE is not compensated.** That mode is meant to be able to almost
-  vanish in mono; for near-mono material the required boost would be unbounded.
-- **Wide/uncorrelated stereo input stays ~3.6 dB down**, because the wet path
-  is built from the mono downmix and the compensation is signal-independent by
-  design.
-
-Switch Auto Gain off in the 詳細 tab to get the raw, uncompensated wet level.
-
-## 5. Signal flow
-
-```
-Input
-  +- Dry path (unchanged) --------------------------------------+
-  |                                                              |
-  +- Mid/Mono extraction                                        |
-       +- Strand A: orbit pos -> depth gain -> depth LPF ->      |
-       |            fractional delay -> equal-power pan   --+   |
-       +- Strand B: (+ twist delay) orbit pos -> depth gain ->   |
-                    depth LPF -> fractional delay -> pan   --+   |
-                                                              |   |
-                                                        Wet sum   |
-                                                          + Core  |
-                                                     [optional]   |
-                                                    NULL CORE     |
-                                                    (Wet only)    |
-                                                          |       |
-                                            Equal-power Dry/Wet mix
-                                                          |
-                                                  Output gain -> Output
+```text
+Input L/R
+  ├─ Dry path
+  └─ 4th-order Linkwitz–Riley Bass Anchor
+       ├─ Low Mid ───────────────────────────────┐
+       └─ High band M/S                         │
+            ├─ Mid → Strand A orbit ──┐          │
+            ├─ Mid → Strand B orbit ──┼─ Auto Gain
+            ├─ Mid → Core ────────────┘          │
+            └─ Side × Stereo Preserve ───────────┤
+                                                 ├─ optional NULL CORE
+                                                 ├─ correlation-aware Dry/Wet
+                                                 ├─ Output
+                                                 └─ optional Soft Bypass → Output
 ```
 
-Stereo input uses `Mid = 0.5*(L+R)` as the source signal for both strands
-and the Core signal; Dry keeps the original L/R. Mono input uses the mono
-signal directly for both Dry and Wet.
+At full Symmetry, strand B stays `pi` radians opposite strand A. Both moving
+strands carry the same Mid programme content, so the orbit's centre is not
+biased by unrelated left/right energy. Stereo width is restored separately as
+a balanced high-band Side layer.
 
-## 6. Building on macOS
+## Main controls
 
-Requirements: Xcode command line tools, CMake ≥ 3.22.
+### Basic
+
+- 速さ — free-running revolution time
+- 広がり — left/right orbit width
+- 立体感 — front/back cue strength
+- 効果量 — correlation-aware Dry/Wet amount
+- action-named factory presets
+
+### Detail
+
+- Tempo Sync and musical Division
+- Phase Mode: Free / Retrigger / Host Lock
+- Start Phase and Direction
+- Symmetry and Twist
+- Core and Stereo Preserve
+- Bass Anchor
+- Character: Natural / Vivid / Deep
+- Output and Auto Gain
+- Soft Bypass
+- NULL CORE
+
+## Parameters
+
+| Parameter | ID | Range | Fresh default |
+|---|---|---:|---:|
+| Rate | `rate` | 0.02–4 Hz | 0.12 Hz |
+| Sync | `sync` | Off/On | Off |
+| Division | `division` | 4 bars–1/8 | 1 bar |
+| Radius | `radius` | 0–100% | 80% |
+| Depth | `depth` | 0–100% | 55% |
+| Symmetry | `symmetry` | 0–100% | 100% |
+| Twist | `twist` | 0–20 ms | 5 ms |
+| Core | `core` | 0–100% | 0% |
+| NULL CORE | `nullCore` | Off/On | Off |
+| Mix | `mix` | 0–100% | 35% |
+| Output | `output` | -12–+6 dB | 0 dB |
+| Auto Gain | `autoGain` | Off/On | On |
+| Stereo Preserve | `stereoPreserve` | 0–100% | 70%* |
+| Soft Bypass | `softBypass` | Off/On | Off |
+| Bass Anchor | `bassAnchorHz` | Off / 20–500 Hz | 120 Hz* |
+| Character | `character` | Natural/Vivid/Deep | Natural |
+| Phase Mode | `phaseMode` | Free/Retrigger/Host Lock | Host Lock* |
+| Start Phase | `startPhase` | 0–360° | 0° |
+| Direction | `direction` | CW/CCW | CW |
+
+\* Compatibility migration:
+
+- schema-1 projects load Stereo Preserve at 0%;
+- schema-1/2 projects load Bass Anchor at 20 Hz, which is a bit-transparent
+  bypass rather than a 20 Hz filter;
+- schema-1/2 projects load Phase Mode as Free, reproducing the previous
+  speed-synchronised but non-position-locked behaviour.
+
+## Bass Anchor
+
+Bass Anchor uses a fourth-order Linkwitz–Riley crossover. Below the selected
+frequency, L/R are converted to a stable mono Low Mid and reintroduced after
+the moving high-band orbit. Above it, the Mid DNA and preserved Side bed work
+normally.
+
+Goals:
+
+- keep kick, bass and full mixes spatially stable;
+- prevent sub/low-frequency Side energy from orbiting unpredictably;
+- retain the source's upper-frequency stereo atmosphere;
+- recombine low/high crossover paths with flat magnitude.
+
+`20 Hz / Off` is a literal bypass: `low = 0`, `high = input`. This is required
+for old-project signal-path compatibility.
+
+## Character
+
+Character controls the front/back perceptual model rather than adding generic
+saturation or oversampling.
+
+- **Natural** — original 4 dB attenuation, 5 kHz rear cutoff, 8 ms rear delay
+- **Vivid** — stronger 6 dB movement, brighter 8 kHz rear cutoff, 10 ms delay
+- **Deep** — 8 dB attenuation, darker 3.5 kHz rear cutoff, 14 ms delay
+
+The values are current engineering defaults, not final artistic tuning. Final
+preset values require real vocal, guitar, synth, drum and full-mix auditioning.
+
+## Tempo and phase
+
+Tempo Sync now separates **speed** from **phase behaviour**.
+
+### Free
+
+The orbit runs continuously. Host BPM changes the rate when Sync is enabled,
+but the current position is not forced to the song timeline.
+
+### Retrigger
+
+The orbit returns to Start Phase whenever transport changes from stopped to
+playing, then runs continuously.
+
+### Host Lock
+
+The orbit is calculated from host PPQ song position:
+
+```text
+phase = startPhase + direction * 2*pi * (PPQ / beatsPerCycle)
+```
+
+`beatsPerCycle` honours the host time signature for bar divisions. A one-bar
+cycle is therefore 4 quarter notes in 4/4, 3 in 3/4 and 3 in 6/8. Half-,
+quarter- and eighth-note divisions remain absolute musical note values.
+
+The same PPQ position, cycle, direction and Start Phase produce the same orbit
+position, supporting repeatable playback and offline rendering. Loop or song
+position jumps use a bounded 30 ms correction instead of a hard audio jump.
+When BPM or PPQ is unavailable, Host Lock falls back safely to Free.
+
+## Stereo Preserve
+
+Stereo Preserve restores the high-band Side component after the geometry-based
+Mid-orbit Auto Gain:
+
+```text
+M = 0.5 * (L + R)
+S = 0.5 * (L - R)
+sideBed = p * S
+wetL += sideBed
+wetR -= sideBed
+```
+
+Consequences:
+
+- the moving DNA always carries common Mid content;
+- pure Side material has equal L/R energy and zero Mid;
+- anti-phase material remains audible above 0%;
+- Side width is not multiplied by a same-source geometry estimate;
+- NULL CORE remains literally Side-only.
+
+## Auto Gain and correlation-aware Mix
+
+Auto Gain has two bounded stages.
+
+1. A deterministic geometry estimate compensates the moving Mid strands and
+   Core using pan, attenuation and delay coherence.
+2. Dry/Wet correlation is measured per block, smoothed over 250 ms and used to
+   remove the persistent +3.01 dB 50%-Mix bump that equal-power mixing produces
+   when Dry and Wet are similar.
+
+```text
+P = gD² + gW² + 2*rho*gD*gW
+normalizer = 1 / sqrt(P)
+```
+
+Correction is limited to approximately ±3.01 dB. Mix 0% and 100% remain
+unchanged. Auto Gain Off exposes the raw geometry and mix law.
+
+## Bypass modes
+
+### Soft Bypass
+
+The plug-in-owned A/B control crossfades linearly to exact Dry over 60 ms while
+keeping delays, filters and orbit position running. Fully bypassed output
+ignores Output trim.
+
+### Host bypass
+
+Host bypass returns immediate exact Dry while the engine advances on a
+preallocated scratch buffer. This avoids stale phase and delay state after
+un-bypass without allocating on the audio thread.
+
+## NULL CORE
+
+NULL CORE removes the Mid component of the complete Wet output. It is an
+experimental, intentionally mono-unsafe Side-only mode. The transition is
+smoothed over approximately 120 ms, the UI shows a warning, and Core is visibly
+disabled while the mode is active.
+
+## Performance work in this branch
+
+- symmetric mode reuses `sin(theta + pi) = -sin(theta)` and
+  `cos(theta + pi) = -cos(theta)` for Strand B;
+- Bass Anchor coefficient rebuilds occur only when the cutoff changes;
+- no new audio-thread allocations, locks, file I/O or UI calls were added;
+- the exact legacy Bass Anchor-off path is maintained;
+- more aggressive control-rate interpolation was deliberately postponed until
+  it can be measured against a larger audio regression corpus.
+
+## Factory presets
+
+Factory presets are defined independently of the GUI in `Source/Presets.h`.
+Every preset sets the complete parameter state, including Bass Anchor,
+Character, phase mode, Start Phase and Direction, so presets never inherit
+hidden values from prior automation.
+
+Current presets:
+
+- ボーカルを広げる
+- パッドを回す
+- ギターに揺らぎ
+- シンセを速く回す
+- 実験:中心を消す
+
+## Visualiser
+
+The 3D double helix is generated from the real orbit history used by the DSP.
+It displays strand paths, the ideal centre reference, centroid drift, output
+RMS, L/R correlation, Bass Anchor state and Host Lock status. Rendering quality
+adapts to measured frame cost and animation stops while the editor is hidden.
+
+## Build
+
+### macOS / Linux
 
 ```sh
-git clone <this-repo> DNA-Orbit
+git clone <repository-url> DNA-Orbit
 cd DNA-Orbit
+git checkout agent/world-class-dsp-phase3
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release -j
 ctest --test-dir build --output-on-failure
 ```
 
-Or generate an Xcode project:
-
-```sh
-cmake -S . -B build-xcode -G Xcode
-cmake --build build-xcode --config Release
-ctest --test-dir build-xcode -C Release --output-on-failure
-```
-
-JUCE is fetched automatically via CMake `FetchContent` from
-`https://github.com/juce-framework/JUCE.git`, pinned to tag `8.0.15`. If you
-need to build offline, clone JUCE yourself and point CMake at it:
-
-```sh
-git clone --branch 8.0.15 --depth 1 https://github.com/juce-framework/JUCE.git
-cmake -S . -B build -DFETCHCONTENT_SOURCE_DIR_JUCE=$(pwd)/JUCE
-```
-
-Formats built: **Standalone**, **VST3**, **AU** (AU only builds on macOS).
-
-## 7. Building on Windows
-
-Requirements: Visual Studio 2022 (Desktop C++ workload), CMake ≥ 3.22.
+### Windows
 
 ```powershell
-git clone <this-repo> DNA-Orbit
+git clone <repository-url> DNA-Orbit
 cd DNA-Orbit
+git checkout agent/world-class-dsp-phase3
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-Formats built: **Standalone**, **VST3** (AU is not available on Windows).
+JUCE is pinned to 8.0.15 and fetched through CMake `FetchContent`.
 
-## 8. Building on Linux (used to validate this project during development)
+## Test coverage
 
-Requires ALSA, X11, FreeType/Fontconfig, and GTK3 development packages
-(`libasound2-dev libjack-jackd2-dev libcurl4-openssl-dev libfreetype6-dev
-libx11-dev libxcomposite-dev libxcursor-dev libxext-dev libxinerama-dev
-libxrandr-dev libxrender-dev libgtk-3-dev` on Debian/Ubuntu), plus
-`fonts-noto-cjk` for the Japanese UI text. Same commands as macOS above. Formats built: **Standalone**, **VST3** (no AU on Linux).
+The CTest executable now includes coverage for:
 
-## 9. Testing
+- orbit geometry and finite-output stress cases;
+- state migration and complete parameter round-trip;
+- exact host-bypass and Soft Bypass behaviour;
+- Stereo Preserve and centred Side-bed invariants;
+- correlation-aware mix endpoints and 50% level behaviour;
+- Linkwitz–Riley crossover recombination;
+- Bass Anchor low-frequency Side removal and high-frequency preservation;
+- distinct finite Character responses;
+- 3/4, 4/4 and 6/8 musical bar lengths;
+- deterministic Host Lock at identical PPQ positions;
+- Start Phase and direction mapping;
+- complete factory-preset determinism.
+
+## Validation status
+
+The code and tests are present in the draft PR, but this ChatGPT environment
+could not download and compile the complete GitHub branch. None of the new
+build/test claims are marked passed yet.
+
+Before changing the PR from draft:
 
 ```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release -j
 ctest --test-dir build --output-on-failure
 ```
 
-The suite (`Tests/DNAOrbitTests`, run via CTest) covers, using JUCE's
-built-in `UnitTest` framework:
+Then run the sanitizer configuration in `CMakeLists.txt`, headless screenshot
+rendering, pluginval, VST3 Validator and `auval` where available.
 
-- **OrbitMath** — perfect-symmetry centroid lock (2000+ angles, < 1e-5
-  error), same-position centroid, 90° analytical check, radius-mismatch
-  centroid bias, rate-difference beat-cycle behaviour, equal-power pan
-  unity-power check, front/back mapping.
-- **HelixEngine** — silence-in sanity at parameter extremes, impulse-response
-  finiteness, all 5 required sample rates × all 9 required block sizes,
-  all-parameters-at-extremes stress test, long-run Symmetry-100% centroid
-  stability (angles stay wrapped, centroid stays locked), parameter-jump
-  click bound, Mix 0% == Dry, NULL CORE + Mix 100% mono cancellation, NULL
-  CORE off does *not* cancel in mono, mono-in/stereo-out path.
-- **State** — full parameter round-trip through `getStateInformation` /
-  `setStateInformation`, crash-safety against null/garbage/empty state data,
-  bus-layout support/rejection, bypass pass-through.
-- **LevelMatch** — the 81-point Auto Gain sweep described above, Auto Gain
-  off restoring the raw level, the correlation meter against known
-  mono/inverted signals, and the RMS meter returning to zero on silence.
-  Driven with pink noise rather than white: the Depth low-pass has unity DC
-  gain but removes real energy from a broadband signal, and white noise
-  exaggerates that far beyond any real programme material.
-- **Geometry** — that the helix's stored shape is identical at 0.02 Hz and
-  4 Hz (measured difference: 0.0 rad), that `phi == pi` puts the centroid at
-  zero for every stored sample (residual 1.7e-15, the floating-point floor),
-  that a phase error visibly displaces it, that a long message-thread stall
-  resynthesises rather than looping, and that the projection fits inside the
-  component at every supported window size and never folds over.
+## Remaining commercial work
 
-## 10. Where the build output lands
+- compile-error and regression fixes discovered by the first local build;
+- measured CPU profiling at 44.1/48/96/192 kHz and multiple block sizes;
+- final Character and factory-preset listening/tuning;
+- visual timeline reset verification on host loop/jump;
+- English localisation and full accessibility pass;
+- macOS/Windows signing, notarisation and installers;
+- real-DAW scan, automation, project restore and offline-bounce verification.
 
-After `cmake --build build --config Release`:
+The front/back model is a musical perceptual approximation, not HRTF or a
+physical binaural renderer.
 
-- Standalone: `build/DNAOrbit_artefacts/Release/Standalone/DNA Orbit`
-  (`.app` on macOS, `.exe` on Windows)
-- VST3: `build/DNAOrbit_artefacts/Release/VST3/DNA Orbit.vst3`
-- AU (macOS only): `build/DNAOrbit_artefacts/Release/AU/DNA Orbit.component`
+## Licensing and manual release checks
 
-## 11. JUCE version
-
-**8.0.15**, pinned via `GIT_TAG` in `CMakeLists.txt`'s `FetchContent_Declare`.
-
-## 12. Licensing
-
-See `LICENSE_NOTES.md`. JUCE is dual-licensed (AGPLv3/free tiers vs. paid
-Indie/Pro tiers); **confirm which tier applies before distributing a built
-copy of DNA Orbit**, since obligations (source availability, splash screen,
-attribution) differ between tiers. This build deliberately leaves JUCE's
-splash-screen requirement at its default (enabled), matching the free
-tiers' terms.
-
-## 13. Known limitations
-
-- **Built and tested on Linux in this environment** (VST3 + Standalone
-  only — AU is macOS-only and could not be built or verified here). The
-  CMake configuration targets macOS as primary and is Windows-buildable,
-  but neither macOS nor Windows builds were exercised in this session; use
-  the build commands above to verify on those platforms.
-- No `pluginval` or DAW was available in this environment, so validation is
-  limited to the automated CTest suite plus headless screenshot rendering.
-- **This container has no audio device, so the Standalone build's visualiser
-  is frozen** — with no audio callback, `processBlock` never runs and the
-  orbit phase never advances. That is an environment limitation, not a
-  plugin bug. The `RenderShots` tool (below) exists to work around it, and
-  is what was used to verify the animated locked/drifting behaviour.
-- Presets are applied from the UI menu; they are not exposed as DAW
-  program-change slots (`getNumPrograms()` is still 1).
-- Japanese text needs a Japanese font installed. macOS (Hiragino) and
-  Windows (Yu Gothic UI) have one by default; on Linux install
-  `fonts-noto-cjk`, otherwise the labels fall back to a face with no CJK
-  coverage.
-- Sync Division assumes a 4/4 time signature when converting bars to beats.
-- The back-position filter/delay/gain model (section 5) is a set of
-  perceptual approximations, not a physically modelled 3D audio engine —
-  by design, per the spec (no HRTF, no true binaural front/back cues).
-- The 3D view's vertical axis is time, not a third audio dimension. The
-  audio itself uses only pan (x) and the front/back cues (z).
-- Auto Gain does not compensate NULL CORE, and leaves wide/uncorrelated
-  stereo input about 3.6 dB down — both deliberate, see section 4.
-- Renderer performance was measured only on this container's software
-  rasteriser. On macOS/Windows the same code runs on CoreGraphics/Direct2D
-  and should be faster, but that has not been measured on real hardware.
-
-### Developer tool: `RenderShots`
-
-Renders editor screenshots headlessly by driving the processor directly and
-pumping the message loop, so the visualiser animates without an audio device:
-
-```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DDNA_ORBIT_BUILD_TOOLS=ON
-cmake --build build --config Release -j --target DNAOrbitRenderShots
-./build/DNAOrbitRenderShots <output-directory>
-```
-
-It writes a locked shot, a detail-tab shot, two drift shots and a NULL CORE
-shot. Off by default (`DNA_ORBIT_BUILD_TOOLS=OFF`).
-
-## 14. Manual checks to run in a real DAW before shipping
-
-- [ ] Load in at least one DAW as VST3 (and AU, on macOS) and confirm the
-      plugin scans, loads, and its editor opens at 900×620, resizable
-      between 780×540 and 1600×1100.
-- [ ] Confirm all Japanese text renders correctly (no boxes or garbled
-      characters) on the target OS, at both small and large window sizes.
-- [ ] Switch between the 基本 and 詳細 tabs; confirm the selected tab and the
-      window size are restored after closing and reopening the editor.
-- [ ] Try each preset from the プリセット menu and confirm it sounds sensible
-      on the source it is named for.
-- [ ] Watch CPU while the editor is open vs closed, and with several
-      instances open at once — the visualiser stops its timer when hidden,
-      so confirm that actually happens in your host.
-- [ ] Automate Rate, Radius, Depth, Symmetry, Twist, Core, Mix, Output from
-      the DAW and confirm no clicks/zippering.
-- [ ] Toggle Null Core repeatedly while playing audio; confirm the
-      crossfade is click-free and the warning text appears/disappears.
-- [ ] Set 対称性 to 100% and watch the centre line: it should be dead
-      straight, sitting exactly on the reference axis, with 中心軸 固定 (0)
-      and a readout of A +x / B −x / 中心 0.0000. Lower it and confirm the
-      line visibly waves, turns orange, and the status becomes 中心軸 ゆらぎ.
-      Return it to 100% and confirm it re-locks smoothly within ~0.2 s
-      rather than snapping.
-- [ ] Toggle 音量自動補正 while playing and sweep 効果量 0→100%; with it on
-      the perceived level should stay put, with it off it should drop.
-- [ ] Sum a HELIX-mode mix to mono and confirm the signal does **not**
-      disappear. Sum a NULL CORE mix to mono and confirm the Wet portion
-      **does** collapse toward silence while Dry (if Mix < 100%) remains.
-- [ ] Enable Sync, change host tempo and Sync Division, confirm the orbit
-      rate follows tempo; disable/break tempo reporting (e.g. a plain audio
-      track host) and confirm it falls back to the free Rate value instead
-      of glitching.
-- [ ] Save a project, close and reopen it (or bounce state through your
-      DAW's own load/save), confirm every knob, toggle, and the Division
-      choice come back exactly as left.
-- [ ] Feed mono and stereo tracks into the plugin (mono track routed to a
-      stereo bus) and confirm both input configurations sound sensible and
-      produce no channel-count errors.
-- [ ] Listen on headphones and on speakers; confirm the "orbit" character
-      doesn't degenerate into a flat left/right tremolo, especially with
-      Depth raised above ~50%.
-- [ ] Check CPU load with several instances running simultaneously.
+See `LICENSE_NOTES.md`, `MANUAL_REQUIRED.md` and the documents under
+`docs/commercial-upgrade/`. Confirm the JUCE licence, signing, notarisation,
+installer and clean-machine requirements before distribution.

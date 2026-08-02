@@ -1,18 +1,16 @@
 /**
- * Headless screenshot harness.
+ * Headless UI screenshot harness.
  *
- * The Standalone build cannot animate in a container with no audio device: with
- * no audio callback, processBlock never runs, the orbit phase never advances and
- * the visualiser is frozen. This tool drives the processor directly from the
- * message thread while pumping the event loop, so the timers fire and the view
- * animates exactly as it would in a DAW - which makes it possible to actually
- * SEE and verify the locked-vs-drifting centre line.
+ * The tool drives the processor directly while pumping the message loop so the
+ * visualiser and editor timers advance without a DAW or audio device.
  *
- * Usage: RenderShots <output-directory>
+ * Usage: DNAOrbitRenderShots <output-directory>
  */
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_gui_basics/juce_gui_basics.h>
+
+#include <cmath>
 
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
@@ -20,23 +18,27 @@
 
 namespace
 {
-    void setParam (juce::AudioProcessorValueTreeState& apvts, const char* id, float actual)
+    void setParam (juce::AudioProcessorValueTreeState& apvts,
+                   const char* id, float actual)
     {
-        if (auto* p = apvts.getParameter (id))
-            p->setValueNotifyingHost (p->convertTo0to1 (actual));
+        if (auto* parameter = apvts.getParameter (id))
+            parameter->setValueNotifyingHost (parameter->convertTo0to1 (actual));
     }
 
     struct Scenario
     {
         const char* fileName;
+        int width;
+        int height;
+        int page;
         float symmetry;
         float rateHz;
-        bool  nullCore;
-        int   page;          // 0 = basic, 1 = detail
+        bool sync;
+        bool nullCore;
+        bool softBypass;
         double secondsToRun;
     };
 
-    /** Returns true on success, so callers can turn a write failure into a non-zero exit code. */
     bool renderScenario (const Scenario& scenario, const juce::File& outputDir)
     {
         DNAOrbitAudioProcessor processor;
@@ -47,60 +49,79 @@ namespace
 
         setParam (processor.apvts, dnaorbit::params::symmetryID, scenario.symmetry);
         setParam (processor.apvts, dnaorbit::params::rateID, scenario.rateHz);
-        if (auto* nullCore = processor.apvts.getParameter (dnaorbit::params::nullCoreID))
-            nullCore->setValueNotifyingHost (scenario.nullCore ? 1.0f : 0.0f);
+        setParam (processor.apvts, dnaorbit::params::syncID, scenario.sync ? 1.0f : 0.0f);
+        setParam (processor.apvts, dnaorbit::params::nullCoreID, scenario.nullCore ? 1.0f : 0.0f);
+        setParam (processor.apvts, dnaorbit::params::softBypassID, scenario.softBypass ? 1.0f : 0.0f);
+        setParam (processor.apvts, dnaorbit::params::bassAnchorID, 120.0f);
+        setParam (processor.apvts, dnaorbit::params::stereoPreserveID, 70.0f);
+        setParam (processor.apvts, dnaorbit::params::phaseModeID,
+                  (float) dnaorbit::params::phaseHostLock);
 
-        processor.apvts.state.setProperty ("editorPage", scenario.page, nullptr);
+        processor.apvts.state
+            .getOrCreateChildWithName (dnaorbit::params::uiStateNodeID, nullptr)
+            .setProperty (dnaorbit::params::editorPagePropertyID, scenario.page, nullptr);
 
         std::unique_ptr<juce::AudioProcessorEditor> editor { processor.createEditor() };
-        editor->setSize (900, 620);
+        editor->setSize (scenario.width, scenario.height);
         editor->setVisible (true);
 
         juce::AudioBuffer<float> buffer (2, blockSize);
         juce::MidiBuffer midi;
         juce::Random random { 1234 };
-        double phase = 0.0;
+        double phaseA = 0.0;
+        double phaseB = 0.0;
 
-        const int blocks = (int) (scenario.secondsToRun * sampleRate / blockSize);
+        const int blocks = juce::jmax (1, (int) std::ceil (
+            scenario.secondsToRun * sampleRate / blockSize));
 
-        for (int i = 0; i < blocks; ++i)
+        for (int block = 0; block < blocks; ++block)
         {
             for (int n = 0; n < blockSize; ++n)
             {
-                const float sample = 0.25f * (float) std::sin (phase)
-                                   + 0.05f * (random.nextFloat() * 2.0f - 1.0f);
-                phase += juce::MathConstants<double>::twoPi * 220.0 / sampleRate;
-                buffer.setSample (0, n, sample);
-                buffer.setSample (1, n, sample);
+                const float mid = 0.20f * (float) std::sin (phaseA)
+                                + 0.035f * (random.nextFloat() * 2.0f - 1.0f);
+                const float side = 0.055f * (float) std::sin (phaseB);
+                phaseA += juce::MathConstants<double>::twoPi * 220.0 / sampleRate;
+                phaseB += juce::MathConstants<double>::twoPi * 337.0 / sampleRate;
+                buffer.setSample (0, n, mid + side);
+                buffer.setSample (1, n, mid - side);
             }
 
             processor.processBlock (buffer, midi);
-
-            // Let the editor's timers run so the history advances.
             juce::MessageManager::getInstance()->runDispatchLoopUntil (8);
         }
 
-        juce::MessageManager::getInstance()->runDispatchLoopUntil (120);
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (140);
 
         const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), false);
+        if (! image.isValid()
+            || image.getWidth() != scenario.width
+            || image.getHeight() != scenario.height)
+        {
+            std::printf ("FAILED invalid snapshot %s\n", scenario.fileName);
+            return false;
+        }
+
         const auto file = outputDir.getChildFile (scenario.fileName);
         file.deleteFile();
 
         juce::FileOutputStream stream { file };
         if (! stream.openedOk())
         {
-            std::printf ("FAILED to open %s for writing\n", file.getFullPathName().toRawUTF8());
+            std::printf ("FAILED to open %s\n", file.getFullPathName().toRawUTF8());
             return false;
         }
 
         juce::PNGImageFormat png;
         if (! png.writeImageToStream (image, stream))
         {
-            std::printf ("FAILED to encode PNG for %s\n", file.getFullPathName().toRawUTF8());
+            std::printf ("FAILED to encode %s\n", file.getFullPathName().toRawUTF8());
             return false;
         }
 
-        std::printf ("wrote %s\n", file.getFullPathName().toRawUTF8());
+        std::printf ("wrote %s (%dx%d)\n",
+                     file.getFullPathName().toRawUTF8(),
+                     scenario.width, scenario.height);
         return true;
     }
 }
@@ -109,27 +130,30 @@ int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    const juce::File outputDir = argc > 1 ? juce::File (juce::String (argv[1]))
-                                          : juce::File::getCurrentWorkingDirectory();
+    const juce::File outputDir = argc > 1
+        ? juce::File (juce::String (argv[1]))
+        : juce::File::getCurrentWorkingDirectory();
 
     if (! outputDir.createDirectory())
     {
-        std::printf ("FAILED to create output directory %s\n", outputDir.getFullPathName().toRawUTF8());
+        std::printf ("FAILED to create %s\n",
+                     outputDir.getFullPathName().toRawUTF8());
         return 1;
     }
 
-    // Sweep any *.png left by a previous run - including one from an older
-    // revision of this tool with different scenario file names - so stale
-    // output can never be mistaken for this run's result.
-    for (const auto& stale : outputDir.findChildFiles (juce::File::findFiles, false, "*.png"))
+    for (const auto& stale : outputDir.findChildFiles (
+             juce::File::findFiles, false, "*.png"))
         stale.deleteFile();
 
     const Scenario scenarios[] = {
-        { "shot_basic_locked.png",  100.0f, 0.50f, false, 0, 3.0 },
-        { "shot_detail_locked.png", 100.0f, 0.50f, false, 1, 3.0 },
-        { "shot_drift_70.png",       70.0f, 2.00f, false, 0, 8.0 },
-        { "shot_drift_40.png",       40.0f, 2.00f, false, 0, 8.0 },
-        { "shot_nullcore.png",      100.0f, 0.50f, true,  1, 3.0 },
+        { "ui_basic_min_free_820x650.png",       820, 650, 0, 100.0f, 0.50f, false, false, false, 3.0 },
+        { "ui_basic_min_sync_820x650.png",       820, 650, 0, 100.0f, 0.50f, true,  false, false, 3.0 },
+        { "ui_detail_min_820x650.png",           820, 650, 1, 100.0f, 0.50f, true,  false, false, 3.0 },
+        { "ui_basic_standard_960x700.png",       960, 700, 0, 100.0f, 0.35f, false, false, false, 3.0 },
+        { "ui_detail_standard_960x700.png",      960, 700, 1,  70.0f, 0.65f, true,  false, false, 6.0 },
+        { "ui_detail_wide_1440x900.png",        1440, 900, 1,  45.0f, 1.10f, true,  false, false, 7.0 },
+        { "ui_detail_nullcore_960x700.png",      960, 700, 1, 100.0f, 0.50f, true,  true,  false, 3.0 },
+        { "ui_basic_softbypass_960x700.png",     960, 700, 0, 100.0f, 0.50f, false, false, true,  3.0 }
     };
 
     bool allOk = true;

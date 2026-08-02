@@ -1,0 +1,142 @@
+{
+  "schema_version": 1,
+  "constitution": {
+    "path": "docs/governance/PRODUCT_CONSTITUTION.md",
+    "version": "1.0.0",
+    "sha256_file": "quality/constitution.sha256",
+    "expected_sha256": "d844bc6704ecc6c5e37541f9cded38e06458e2aae54ae3d4abeba53a85306b41"
+  },
+  "required_files": [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "CONTRIBUTING.md",
+    "MANUAL_REQUIRED.md",
+    "docs/governance/PRODUCT_CONSTITUTION.md",
+    "docs/governance/QUALITY_GOVERNANCE_SYSTEM.md",
+    "docs/governance/CHANGE_RISK_MODEL.md",
+    "docs/governance/DECISION_AND_EXCEPTION_POLICY.md",
+    "docs/claude-code/QUALITY_SCORECARD.md",
+    "docs/claude-code/ASSUMPTIONS_REGISTER.md",
+    "docs/quality/README.md",
+    "docs/quality/QUALITY_DEBT_LEDGER.md",
+    "docs/quality/RELEASE_DECISION_LOG.md",
+    "docs/quality/changes/TEMPLATE.md",
+    "docs/quality/exceptions/TEMPLATE.md",
+    "docs/quality/reviews/TEMPLATE.md",
+    "scripts/quality-governance-audit.py",
+    "scripts/quality-gate.sh"
+  ],
+  "risk_order": ["R0", "R1", "R2", "R3", "R4"],
+  "change_record_required_at_or_above": "R2",
+  "independent_review_required_at_or_above": "R3",
+  "adr_required_at_or_above": "R3",
+  "risk_rules": [
+    {
+      "tier": "R4",
+      "patterns": [
+        "docs/governance/PRODUCT_CONSTITUTION.md",
+        "quality/constitution.sha256",
+        "quality/governance.json",
+        "Source/Parameters.h",
+        "Source/PluginProcessor.h",
+        "Source/PluginProcessor.cpp",
+        "CMakeLists.txt",
+        ".github/workflows/*",
+        "LICENSE*",
+        "installer/*",
+        "packaging/*"
+      ]
+    },
+    {
+      "tier": "R3",
+      "patterns": [
+        "Source/dsp/*",
+        "Source/dsp/**/*",
+        "Source/Presets.h",
+        "Source/PluginEditor.h",
+        "Source/PluginEditor.cpp",
+        "Source/ui/HelixView3D.h",
+        "Source/ui/HelixView3D.cpp",
+        "Tests/*",
+        "Tests/**/*"
+      ]
+    },
+    {
+      "tier": "R2",
+      "patterns": [
+        "Source/ui/*",
+        "Source/ui/**/*",
+        "Tools/*",
+        "Tools/**/*",
+        "Resources/*",
+        "Resources/**/*",
+        "docs/claude-code/UI_UX_STANDARD.md"
+      ]
+    },
+    {
+      "tier": "R1",
+      "patterns": [
+        "scripts/*",
+        "scripts/**/*",
+        ".claude/*",
+        ".claude/**/*",
+        ".github/pull_request_template.md",
+        "docs/quality/*",
+        "docs/quality/**/*",
+        "docs/experiments/*",
+        "docs/experiments/**/*"
+      ]
+    },
+    {
+      "tier": "R0",
+      "patterns": [
+        "README.md",
+        "docs/*",
+        "docs/**/*",
+        "*.md"
+      ]
+    }
+  ],
+  "change_record": {
+    "directory": "docs/quality/changes",
+    "template": "docs/quality/changes/TEMPLATE.md",
+    "required_headings": [
+      "## User and musical outcome",
+      "## Constitutional fit",
+      "## Risk classification",
+      "## Truth class and assumptions",
+      "## Protected invariants",
+      "## Compatibility and migration",
+      "## Evidence plan and rejection conditions",
+      "## Independent review",
+      "## Rollback boundary",
+      "## Completion state and decision"
+    ]
+  },
+  "critical_change_requirements": {
+    "adr_directory": "docs/commercial-upgrade/decisions",
+    "review_directory": "docs/quality/reviews",
+    "constitution_owner_approval_marker": "Owner approval: APPROVED"
+  },
+  "exceptions": {
+    "directory": "docs/quality/exceptions",
+    "status_pattern": "Status: (proposed|active|resolved|revoked)",
+    "expiry_pattern": "Expiry: YYYY-MM-DD",
+    "release_blocks_active_unapproved": true
+  },
+  "blocker_terms": [
+    "BLOCKER",
+    "UNRESOLVED HIGH",
+    "EVIDENCE CLAIMED BUT NOT RUN",
+    "CONSTITUTIONAL CONFLICT"
+  ],
+  "release_required_manual_gates": [
+    "level-matched listening",
+    "real DAW validation",
+    "validator results",
+    "UI screenshot inspection",
+    "keyboard and accessibility test",
+    "CPU benchmark review",
+    "signing and packaging"
+  ]
+}

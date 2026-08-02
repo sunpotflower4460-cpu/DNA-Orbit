@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <algorithm>
+#include "OrbitMath.h"
 
 namespace dnaorbit::dsp
 {
@@ -33,7 +34,11 @@ namespace dnaorbit::dsp
             // safe regardless of what prepare() was called with.
             const float upperBound = std::max (20.0f, static_cast<float> (sampleRate * 0.49));
             const float clamped = std::clamp (cutoffHz, 20.0f, upperBound);
-            const float x = std::exp (-2.0f * static_cast<float> (M_PI) * clamped / static_cast<float> (sampleRate));
+            // M_PI is not standard C++; MSVC only defines it when
+            // _USE_MATH_DEFINES is set before <cmath> is included, which this
+            // file did not guarantee. orbitmath::pi is portable and already
+            // the canonical constant used everywhere else in the DSP code.
+            const float x = std::exp (-2.0f * static_cast<float> (orbitmath::pi) * clamped / static_cast<float> (sampleRate));
             coefficient = x;
         }
 

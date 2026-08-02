@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <algorithm>
+#include "OrbitMath.h"
 
 namespace dnaorbit::dsp
 {
@@ -48,7 +49,9 @@ namespace dnaorbit::dsp
     inline DryWetGains equalPowerMix (float mixAmount01) noexcept
     {
         const float clamped = std::clamp (mixAmount01, 0.0f, 1.0f);
-        const float angle = clamped * (float) M_PI * 0.5f;
+        // M_PI is not standard C++ (MSVC needs _USE_MATH_DEFINES before
+        // <cmath>, which was not guaranteed here); orbitmath::pi is portable.
+        const float angle = clamped * (float) orbitmath::pi * 0.5f;
         return { std::cos (angle), std::sin (angle) };
     }
 
