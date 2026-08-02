@@ -14,7 +14,6 @@ namespace
     {
         constexpr double sampleRate = 48000.0;
         constexpr int blockSize = 64;
-
         HelixEngine engine;
         engine.prepare (sampleRate, blockSize, 2);
 
@@ -35,7 +34,6 @@ namespace
 
         juce::AudioBuffer<float> buffer (2, blockSize);
         buffer.clear();
-
         for (int block = 0; block < freeHistoryBlocks; ++block)
             engine.process (buffer, 2);
 
@@ -70,21 +68,49 @@ namespace
             {
                 const float a = runHostLockedTheta (5.25, false, 37.0f);
                 const float b = runHostLockedTheta (5.25, false, 37.0f);
-                expectWithinAbsoluteError (a, b, 1.0e-6f,
-                                           "Two fresh renders from the same song position must use the same orbit phase");
+                expectWithinAbsoluteError (a, b, 1.0e-6f);
             }
 
             beginTest ("Both strands are deterministic below 100% Symmetry regardless of prior playback");
             {
                 const auto shortHistory = runHostLockedState (5.25, false, 37.0f, 0.25f, 3);
                 const auto longHistory = runHostLockedState (5.25, false, 37.0f, 0.25f, 137);
+                expectWithinAbsoluteError (shortHistory.thetaA, longHistory.thetaA, 1.0e-6f);
+                expectWithinAbsoluteError (shortHistory.thetaB, longHistory.thetaB, 1.0e-6f);
+                expectWithinAbsoluteError (shortHistory.phi, longHistory.phi, 1.0e-6f);
+            }
 
-                expectWithinAbsoluteError (shortHistory.thetaA, longHistory.thetaA, 1.0e-6f,
-                                           "Strand A must ignore free-running history after Host Lock activates");
-                expectWithinAbsoluteError (shortHistory.thetaB, longHistory.thetaB, 1.0e-6f,
-                                           "Drifting Strand B must also be derived from PPQ, not its previous state");
-                expectWithinAbsoluteError (shortHistory.phi, longHistory.phi, 1.0e-6f,
-                                           "The complete DNA geometry must be repeatable at a song position");
+            beginTest ("Stopped Host Lock remains exactly frozen at the reported PPQ");
+            {
+                constexpr double sampleRate = 48000.0;
+                constexpr int blockSize = 64;
+                HelixEngine engine;
+                engine.prepare (sampleRate, blockSize, 2);
+
+                HelixEngine::Parameters p;
+                p.rateHz = 0.5f;
+                p.phaseMode = params::phaseHostLock;
+                p.transportPlaying = false;
+                p.hostPositionValid = true;
+                p.hostPpqPosition = 1.25;
+                p.cycleBeats = 4.0;
+                p.symmetry01 = 0.35f;
+                p.bassAnchorHz = 20.0f;
+                p.mix01 = 0.0f;
+                engine.primeParameters (p);
+                engine.setParameters (p);
+
+                juce::AudioBuffer<float> buffer (2, blockSize);
+                buffer.clear();
+                engine.process (buffer, 2);
+                const auto first = engine.getVisualState();
+
+                for (int block = 0; block < 20; ++block)
+                    engine.process (buffer, 2);
+                const auto later = engine.getVisualState();
+
+                expectWithinAbsoluteError (first.thetaA, later.thetaA, 1.0e-6f);
+                expectWithinAbsoluteError (first.thetaB, later.thetaB, 1.0e-6f);
             }
 
             beginTest ("Host Lock maps a quarter cycle to 90 degrees plus per-sample advance");
@@ -95,8 +121,7 @@ namespace
                 const double expected = orbitmath::wrapTwoPi (
                     orbitmath::pi * 0.5 + increment * (blockSize - 1));
                 expectWithinAbsoluteError ((double) runHostLockedTheta (1.0, false),
-                                           expected, 1.0e-5,
-                                           "PPQ 1 in a four-beat cycle must begin at 90 degrees");
+                                           expected, 1.0e-5);
             }
 
             beginTest ("Direction reverses the host-locked orbit");
@@ -108,7 +133,6 @@ namespace
                     orbitmath::pi * 0.5 + increment * (blockSize - 1));
                 const double ccwExpected = orbitmath::wrapTwoPi (
                     -orbitmath::pi * 0.5 - increment * (blockSize - 1));
-
                 expectWithinAbsoluteError ((double) runHostLockedTheta (1.0, false),
                                            cwExpected, 1.0e-5);
                 expectWithinAbsoluteError ((double) runHostLockedTheta (1.0, true),
