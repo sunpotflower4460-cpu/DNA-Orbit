@@ -1,17 +1,13 @@
 # Manual verification required
 
-This file lists checks that are still required before the commercial-upgrade
-branch can be merged or shipped.
+This file lists checks still required before the commercial-upgrade branch can
+be merged or shipped.
 
-The current ChatGPT environment could edit the GitHub repository through the
-GitHub connector, but it could not clone the repository or execute CMake,
-JUCE, CTest, plugin validators or a DAW. Therefore the newest centred Stereo
-Preserve and Soft Bypass changes have **not been compiled or executed in this
-environment**. Older commits contain reported Linux test results, but those do
-not validate the new branch changes.
-
-Do not mark any item below complete without recording the machine, OS, command
-and result.
+The current ChatGPT environment could edit GitHub through the connector but
+could not clone or compile the repository. Therefore the newest centred Stereo
+Preserve, Soft Bypass and correlation-aware Mix changes have **not been
+executed in this environment**. Older commits contain reported Linux results;
+those results do not validate the new branch.
 
 ## 1. Mandatory local build
 
@@ -31,12 +27,9 @@ cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-The draft PR must remain draft if either build fails or any CTest assertion
-fails.
+Keep the PR in draft if compilation or any test fails.
 
 ## 2. Sanitizers
-
-On GCC or Clang:
 
 ```sh
 cmake -S . -B build-asan \
@@ -46,12 +39,12 @@ cmake --build build-asan -j
 ctest --test-dir build-asan --output-on-failure
 ```
 
-Expected result: no project memory error, undefined behaviour or leak.
+Expected: no project memory error, undefined behaviour or leak.
 
 ## 3. Validators
 
-- pluginval strictness 10 against the built VST3 and AU where applicable.
-- Steinberg VST3 Validator on macOS and Windows.
+- pluginval strictness 10
+- Steinberg VST3 Validator
 - macOS AU validation:
 
 ```sh
@@ -60,100 +53,98 @@ auval -v aufx DnaO FpSt
 
 ## 4. Centred Stereo Preserve listening
 
-The current design is documented in
-`docs/commercial-upgrade/decisions/ADR-004-centered-stereo-preserve.md`.
-
-The moving DNA strands and Core receive Mid. Stereo Preserve restores a
-stationary Side bed after geometry Auto Gain. The 70% fresh-instance default
-is a candidate, not a final perceptual truth.
+See `ADR-004-centered-stereo-preserve.md`.
 
 Listen at 0/25/50/70/100% using:
 
-- mono vocal;
-- female and male lead vocal;
+- mono male and female vocal;
 - L-only and R-only material;
-- stereo input with approximately 6 dB L/R imbalance;
+- input with approximately 6 dB L/R imbalance;
 - wide pad;
-- uncorrelated stereo noise or texture;
+- uncorrelated stereo texture;
 - anti-phase stress signal;
-- acoustic guitar;
-- piano;
-- full mix.
+- guitar, piano and full mix.
 
 Confirm:
 
-- the moving helix remains perceptible;
-- the stable Side bed does not mask the DNA motion;
-- L/R-unbalanced material does not make the moving orbit lean unnaturally;
+- the moving helix remains audible;
+- the stable Side bed does not mask motion;
+- unbalanced stereo does not make the moving orbit lean unnaturally;
 - anti-phase material remains audible above 0%;
-- mono input does not change when Preserve moves;
-- mono fold-down remains musically useful in HELIX mode;
-- the most musical factory value is recorded and presets are retuned if 70%
-  is not universally appropriate.
+- mono input is unchanged;
+- HELIX mono fold-down remains musical;
+- the best factory value is recorded. Retune presets if 70% is not suitable.
 
 ## 5. Soft Bypass listening
 
-Soft Bypass is now implemented and documented in
-`docs/commercial-upgrade/decisions/ADR-005-soft-bypass.md`.
+See `ADR-005-soft-bypass.md`.
 
-Automate or toggle it on:
-
-- vocal;
-- sustained pad;
-- transient drum loop;
-- bass-heavy material;
-- full mix.
+Automate and toggle Soft Bypass on vocal, sustained pads, drums, bass-heavy
+material and full mixes.
 
 Confirm:
 
-- no click;
-- no temporary gain flare;
-- endpoint is exact Dry;
-- Output trim does not affect fully bypassed audio;
-- the orbit continues while bypassed;
-- returning from bypass resumes the current orbit, not a stale one.
+- no click or temporary gain flare;
+- fully bypassed output is exact Dry;
+- Output trim does not affect the endpoint;
+- orbit state continues;
+- returning does not resume a stale position.
 
-Compare Soft Bypass with the DAW's host bypass. Host bypass may be immediate;
-Soft Bypass is the preferred musical A/B control.
+Compare with host bypass. Host bypass may be immediate; Soft Bypass is the
+preferred musical A/B control.
 
-## 6. Main Mix and Auto Gain
+## 6. Correlation-aware Mix and Auto Gain
 
-The main Dry/Wet law is still equal-power. Correlated Dry and Wet may produce
-a mid-Mix gain bump. Test Mix 0→100→0 with Auto Gain on and off using mono,
-stereo, transient and anti-phase material.
+See `ADR-006-correlation-aware-mix.md`.
+
+The implementation uses the previous block's Dry/Wet correlation, smoothed
+over 250 ms, with correction bounded to approximately ±3 dB.
+
+Sweep Mix 0→100→0 with Auto Gain on and off using:
+
+- identical/near-identical Dry and Wet conditions;
+- mono vocal;
+- sustained pad;
+- transient drums;
+- wide stereo;
+- anti-phase material;
+- NULL CORE;
+- full mix.
 
 Record:
 
-- integrated or long-window RMS/loudness;
+- input and output RMS or loudness;
 - peak level;
-- audible pumping;
 - level at 25/50/75%;
+- transient behaviour;
+- any delayed gain change after silence or source changes;
 - mono fold-down.
 
-Correlation-aware Mix normalisation remains a planned commercial-quality
-improvement and must be completed or explicitly accepted before shipping.
+Confirm that the correction sounds stable rather than like a loudness rider.
+If the 250 ms time constant is audible, change it only with measurement and
+listening evidence.
 
 ## 7. Real DAW verification
 
-Required DAWs where available:
+Priority DAWs:
 
-- Cubase;
-- Logic Pro;
-- Ableton Live;
-- REAPER;
-- Studio One;
-- FL Studio.
+- Cubase
+- Logic Pro
+- Ableton Live
+- REAPER
+- Studio One
+- FL Studio
 
 For each:
 
 1. scan and load;
-2. open and resize editor;
+2. resize editor;
 3. use every factory preset;
-4. automate every parameter, including Stereo Preserve and Soft Bypass;
-5. save, close and reopen project;
+4. automate all parameters, including Preserve and Soft Bypass;
+5. save, close and reopen;
 6. change tempo and loop;
-7. test host bypass and Soft Bypass;
-8. render or bounce offline;
+7. compare host and Soft Bypass;
+8. bounce offline;
 9. test mono-in/stereo-out and stereo-in/stereo-out;
 10. open multiple instances and check CPU;
 11. remove and reinsert;
@@ -170,51 +161,47 @@ cmake --build build-shots --config Release -j --target DNAOrbitRenderShots
 ```
 
 Inspect Basic, Detail, NULL CORE, drift and modified-preset states. Confirm the
-new Soft Bypass row fits at minimum and maximum editor sizes.
+Soft Bypass row fits at minimum and maximum editor sizes.
 
 ## 9. Performance
 
-Measure with editor closed and open at 44.1/48/96/192 kHz, several block
-sizes and 1/5/10 instances.
+Measure editor closed/open at 44.1/48/96/192 kHz, several block sizes and
+1/5/10 instances.
 
-Pay particular attention to the existing per-sample trigonometry and
-exponential coefficient calculations. Control-rate optimisation and Bass
-Anchor are not yet implemented on this branch.
+The correlation estimate adds only block-rate work, but the existing DSP still
+performs substantial per-sample trigonometry and exponential coefficient
+calculation. Control-rate optimisation remains required.
 
 ## 10. Signing and distribution
 
 ### macOS
 
-- Developer ID signing;
-- Hardened Runtime;
-- notarisation with `notarytool`;
-- staple;
-- `codesign --verify --deep --strict`;
-- `spctl --assess`.
+- Developer ID signing
+- Hardened Runtime
+- notarisation and staple
+- `codesign --verify --deep --strict`
+- `spctl --assess`
 
 ### Windows
 
-- code-signing certificate;
-- timestamped installer signing;
-- SmartScreen check;
-- standard VST3 install path;
-- uninstall and upgrade-install test.
+- timestamped code and installer signing
+- SmartScreen check
+- standard VST3 path
+- uninstall and upgrade-install tests
 
 ## 11. CI decision
 
-Per the user's explicit decision, no GitHub Actions workflow has been added.
-All checks must currently be run locally. The existing CMake sanitizer option
-can be connected to CI later without changing the DSP.
+Per the user's decision, no GitHub Actions workflow has been added. Checks must
+currently be run locally. The sanitizer CMake option can be connected to CI
+later without changing DSP code.
 
 ## 12. Remaining product work
 
-Not implemented yet:
+- Bass Anchor crossover
+- PPQ-position Host Phase Lock and non-4/4 bar handling
+- control-rate CPU optimisation
+- Character modes and final preset tuning
+- English localisation and accessibility
+- installer/signing workflow
 
-- Bass Anchor crossover;
-- PPQ-position Host Phase Lock and non-4/4 bar handling;
-- correlation-aware main Mix normalisation;
-- Character modes;
-- English localisation and accessibility pass;
-- full installer/signing workflow.
-
-These are not hidden limitations; they are release-planning items.
+These are explicit release-planning items, not hidden completed work.
