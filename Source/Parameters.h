@@ -24,40 +24,36 @@ namespace dnaorbit::params
     inline constexpr const char* stereoPreserveID = "stereoPreserve";
 
     /**
-     * State schema version, stored as a property on apvts.state (alongside
-     * editorPage/Width/Height) rather than as a parameter, since it is not an
-     * audio-controllable value.
+     * State schema version, stored as a property on apvts.state rather than
+     * as a parameter, since it is not an audio-controllable value.
      *
-     *   1 - baseline: the 12 parameters above, Wet built from a mono (M-only)
-     *       downmix, no stereo-preserving source model.
-     *   2 - adds Stereo Preserve (stereoPreserveID): Wet's per-strand source
-     *       becomes M +/- p*S instead of a shared mono M downmix, fixing
-     *       anti-phase stereo input collapsing Wet to silence. A schema-1
-     *       save has no stereoPreserve PARAM node at all (it didn't exist
-     *       yet), so it is force-set to 0 on load to exactly reproduce the
-     *       schema-1 sound (see PluginProcessor::setStateInformation and
-     *       Tests/BaselineRegressionTests.cpp). A genuinely fresh instance
-     *       (nothing loaded) gets the parameter's declared default instead.
+     *   1 - baseline: Wet built from a mono Mid downmix, with no preserved
+     *       Side layer.
+     *   2 - adds Stereo Preserve (stereoPreserveID). The moving strands and
+     *       Core remain driven by Mid, while p*Side is restored as a stationary
+     *       balanced stereo bed after Mid-orbit level matching. This fixes
+     *       anti-phase input collapsing Wet to silence without feeding unequal
+     *       L/R programme energy into the two moving strands.
      *
-     * Bump this whenever a new schema version changes how a *missing* schema
-     * property (i.e. a project saved by an older build) should be
-     * interpreted - not for ordinary new parameters, which APVTS already
-     * defaults safely on its own. See PluginProcessor::setStateInformation.
+     * A schema-1 save has no stereoPreserve PARAM node at all, so it is forced
+     * to 0 on load to reproduce the schema-1 signal path. A genuinely fresh
+     * instance gets the parameter's declared default instead.
+     *
+     * Bump this whenever a new schema version changes how a missing property
+     * or parameter must be interpreted. See PluginProcessor::setStateInformation.
      */
     inline constexpr const char* schemaVersionPropertyID = "dnaOrbitSchemaVersion";
     inline constexpr int currentStateSchemaVersion = 2;
 
     /**
-     * A save with no schemaVersion attribute at all predates the property
-     * itself (it did not exist before schema 1), so it is schema 1 by
-     * definition - a fixed historical fact, NOT "whatever the current
-     * version happens to be". Do not use currentStateSchemaVersion as that
-     * fallback: it will keep incrementing, but a missing attribute always
-     * means schema 1.
+     * A save with no schemaVersion attribute predates the property itself, so
+     * it is schema 1 by definition. Do not use currentStateSchemaVersion as
+     * that fallback: the current version will keep incrementing, while a
+     * missing attribute always refers to the historical unversioned format.
      */
     inline constexpr int legacyUnversionedSchema = 1;
 
-    /** Schema version at which stereoPreserveID first existed; see above. */
+    /** Schema version at which stereoPreserveID first existed. */
     inline constexpr int stereoPreserveIntroducedInSchema = 2;
 
     /**
@@ -68,7 +64,7 @@ namespace dnaorbit::params
      * properties instead - see PluginProcessor::setStateInformation for the
      * one-time migration that moves them into this node.
      */
-    inline constexpr const char* uiStateNodeID        = "uiState";
+    inline constexpr const char* uiStateNodeID          = "uiState";
     inline constexpr const char* editorPagePropertyID   = "editorPage";
     inline constexpr const char* editorWidthPropertyID  = "editorWidth";
     inline constexpr const char* editorHeightPropertyID = "editorHeight";
@@ -77,14 +73,11 @@ namespace dnaorbit::params
     inline constexpr float rateMaxHz = 4.0f;
     inline constexpr float rateDefaultHz = 0.12f;
 
-    // A fresh instance defaults to 70%: the centre-at-zero geometry is
-    // identical at every Stereo Preserve value (it depends only on the two
-    // strands staying antipodal, not on what feeds them), so there is no
-    // physical trade-off in picking a higher default - it just better
-    // expresses "two distinct strands" and incidentally fixes anti-phase
-    // stereo input collapsing Wet to silence. A project saved before this
-    // parameter existed (schema 1) is force-set to 0 instead, to exactly
-    // reproduce its original sound - see currentStateSchemaVersion above.
+    // 70% remains a listening candidate for fresh instances, not a claim that
+    // one value is physically universal. The moving Mid orbit is centred at
+    // every value; this control only restores the original stationary Side
+    // bed. Final shipping default must be confirmed on real programme material.
+    // Legacy schema-1 projects are forced to 0 for signal-path compatibility.
     inline constexpr float stereoPreserveDefaultPercent = 70.0f;
     inline constexpr float stereoPreserveLegacyPercent = 0.0f;
 
@@ -102,7 +95,7 @@ namespace dnaorbit::params
             case 2: return 4.0;  // 1 bar
             case 3: return 2.0;  // 1/2
             case 4: return 1.0;  // 1/4
-            case 5: return 0.5; // 1/8
+            case 5: return 0.5;  // 1/8
             default: return 4.0;
         }
     }
@@ -191,15 +184,14 @@ namespace dnaorbit::params
             juce::NormalisableRange<float> (-12.0f, 6.0f, 0.01f), 0.0f,
             juce::AudioParameterFloatAttributes().withLabel ("dB")));
 
-        // Level-matches the Wet signal to Dry so moving Mix does not change the
-        // perceived loudness. Defaults to on; can be switched off to get the
-        // raw, uncompensated wet level.
+        // Level-matches the moving Mid-orbit section. Stereo Preserve's Side
+        // bed is intentionally added after this compensation, so original
+        // width is not multiplied by a geometry-only estimate.
         paramList.push_back (std::make_unique<juce::AudioParameterBool> (
             juce::ParameterID { autoGainID, 1 }, "Auto Gain", true));
 
-        // 0% = both strands (and Core) fed from a shared Mid downmix, the
-        // schema-1 behaviour. 100% = Strand A/B fed directly from L/R. See
-        // HelixEngine::process() and the schema-version doc comment above.
+        // 0% = the schema-1 Mid-only Wet path. 100% restores the input Side
+        // component at unity around the centred moving Mid orbit.
         paramList.push_back (std::make_unique<juce::AudioParameterFloat> (
             juce::ParameterID { stereoPreserveID, 1 }, "Stereo Preserve",
             juce::NormalisableRange<float> (0.0f, 100.0f, 0.01f), stereoPreserveDefaultPercent,
