@@ -7,7 +7,10 @@ using namespace dnaorbit::dsp;
 
 namespace
 {
-    float runHostLockedTheta (double ppq, bool reverse, float startDegrees = 0.0f)
+    HelixEngine::VisualState runHostLockedState (double ppq, bool reverse,
+                                                  float startDegrees = 0.0f,
+                                                  float symmetry = 1.0f,
+                                                  int freeHistoryBlocks = 0)
     {
         constexpr double sampleRate = 48000.0;
         constexpr int blockSize = 64;
@@ -16,12 +19,12 @@ namespace
         engine.prepare (sampleRate, blockSize, 2);
 
         HelixEngine::Parameters p;
-        p.rateHz = 0.5f;       // 120 BPM, one cycle per 4 quarter notes
-        p.phaseMode = params::phaseHostLock;
+        p.rateHz = 0.5f;
+        p.phaseMode = params::phaseFree;
         p.startPhaseDegrees = startDegrees;
         p.reverseDirection = reverse;
+        p.symmetry01 = symmetry;
         p.transportPlaying = true;
-        p.transportJustStarted = true;
         p.hostPositionValid = true;
         p.hostPpqPosition = ppq;
         p.cycleBeats = 4.0;
@@ -32,8 +35,20 @@ namespace
 
         juce::AudioBuffer<float> buffer (2, blockSize);
         buffer.clear();
+
+        for (int block = 0; block < freeHistoryBlocks; ++block)
+            engine.process (buffer, 2);
+
+        p.phaseMode = params::phaseHostLock;
+        p.transportJustStarted = false;
+        engine.setParameters (p);
         engine.process (buffer, 2);
-        return engine.getVisualState().thetaA;
+        return engine.getVisualState();
+    }
+
+    float runHostLockedTheta (double ppq, bool reverse, float startDegrees = 0.0f)
+    {
+        return runHostLockedState (ppq, reverse, startDegrees).thetaA;
     }
 
     class TransportPhaseTests : public juce::UnitTest
@@ -57,6 +72,19 @@ namespace
                 const float b = runHostLockedTheta (5.25, false, 37.0f);
                 expectWithinAbsoluteError (a, b, 1.0e-6f,
                                            "Two fresh renders from the same song position must use the same orbit phase");
+            }
+
+            beginTest ("Both strands are deterministic below 100% Symmetry regardless of prior playback");
+            {
+                const auto shortHistory = runHostLockedState (5.25, false, 37.0f, 0.25f, 3);
+                const auto longHistory = runHostLockedState (5.25, false, 37.0f, 0.25f, 137);
+
+                expectWithinAbsoluteError (shortHistory.thetaA, longHistory.thetaA, 1.0e-6f,
+                                           "Strand A must ignore free-running history after Host Lock activates");
+                expectWithinAbsoluteError (shortHistory.thetaB, longHistory.thetaB, 1.0e-6f,
+                                           "Drifting Strand B must also be derived from PPQ, not its previous state");
+                expectWithinAbsoluteError (shortHistory.phi, longHistory.phi, 1.0e-6f,
+                                           "The complete DNA geometry must be repeatable at a song position");
             }
 
             beginTest ("Host Lock maps a quarter cycle to 90 degrees plus per-sample advance");
