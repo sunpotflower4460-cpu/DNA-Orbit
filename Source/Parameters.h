@@ -22,6 +22,7 @@ namespace dnaorbit::params
     inline constexpr const char* outputID   = "output";
     inline constexpr const char* autoGainID = "autoGain";
     inline constexpr const char* stereoPreserveID = "stereoPreserve";
+    inline constexpr const char* softBypassID = "softBypass";
 
     /**
      * State schema version, stored as a property on apvts.state rather than
@@ -128,7 +129,6 @@ namespace dnaorbit::params
                     if (hz <= 0.0f)
                         return juce::String ("-");
                     const float secondsPerTurn = 1.0f / hz;
-                    // juce::String(const char*) parses as ASCII, so wrap UTF-8 explicitly.
                     return juce::String (secondsPerTurn, secondsPerTurn < 10.0f ? 2 : 1)
                          + juce::String (juce::CharPointer_UTF8 ("秒/周"));
                 })
@@ -196,6 +196,11 @@ namespace dnaorbit::params
             juce::ParameterID { stereoPreserveID, 1 }, "Stereo Preserve",
             juce::NormalisableRange<float> (0.0f, 100.0f, 0.01f), stereoPreserveDefaultPercent,
             juce::AudioParameterFloatAttributes().withLabel ("%")));
+
+        // Internal-state-preserving bypass for musical A/B and automation.
+        // The engine continues running and crossfades to exact Dry in 60 ms.
+        paramList.push_back (std::make_unique<juce::AudioParameterBool> (
+            juce::ParameterID { softBypassID, 1 }, "Soft Bypass", false));
 
         return { paramList.begin(), paramList.end() };
     }
