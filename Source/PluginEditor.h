@@ -35,25 +35,32 @@ private:
                       const juce::String& label, const juce::String& tooltip,
                       std::unique_ptr<ComboAttachment>& attachment,
                       const juce::String& paramID);
-    void layOutKnobRow (juce::Rectangle<int> row, const std::vector<Knob*>& knobs);
+    void setKnobVisible (Knob&, bool);
+    void setKnobEnabled (Knob&, bool);
+    void layOutKnobRow (juce::Rectangle<int> row, const std::vector<Knob*>& knobs,
+                        int minimumSlotWidth = 82);
+    void layoutBasicControls (juce::Rectangle<int> area);
+    void layoutDetailControls (juce::Rectangle<int> area);
     void showPage (int page);
     void applyPreset (int presetIndex);
     void timerCallback() override;
 
+    bool usesCompactDetailLayout() const noexcept;
+    int currentControlPanelHeight() const noexcept;
     juce::ValueTree uiStateTree() const;
     static juce::Font japaneseFont (float height, bool bold = false);
 
     DNAOrbitAudioProcessor& processorRef;
     dnaorbit::ui::DnaLookAndFeel lookAndFeel;
     dnaorbit::ui::HelixView3D helixView;
-    juce::TooltipWindow tooltipWindow { this, 600 };
+    juce::TooltipWindow tooltipWindow { this, 500 };
 
-    juce::Label titleLabel, subtitleLabel;
+    juce::Label productTagLabel, titleLabel, subtitleLabel;
     juce::TextButton basicTabButton, detailTabButton;
     int currentPage = 0;
 
     juce::ComboBox presetBox;
-    juce::Label presetLabel;
+    juce::Label presetLabel, presetStateLabel;
     juce::TextButton revertButton;
     int currentPresetIndex = -1;
 
@@ -77,10 +84,17 @@ private:
     std::unique_ptr<ComboAttachment> phaseModeAttachment;
     std::unique_ptr<ComboAttachment> directionAttachment;
 
-    juce::Label readoutLabel, statusLabel, warningLabel;
+    juce::Label guideLabel, statusLabel, diagnosticLabel, warningLabel;
     std::unique_ptr<juce::ParameterAttachment> nullCoreWatcher;
 
-    static constexpr int controlPanelHeight = 184;
+    juce::Rectangle<int> visualCardBounds;
+    juce::Rectangle<int> controlPanelBounds;
+    juce::Rectangle<int> motionCardBounds;
+    juce::Rectangle<int> spaceCardBounds;
+    juce::Rectangle<int> outputCardBounds;
+
+    static constexpr int minimumEditorWidth = 820;
+    static constexpr int minimumEditorHeight = 620;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DNAOrbitAudioProcessorEditor)
 };
