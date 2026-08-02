@@ -35,7 +35,6 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
 
     addAndMakeVisible (helixView);
 
-    // --- Tabs -----------------------------------------------------------------
     for (auto* button : { &basicTabButton, &detailTabButton })
     {
         button->setClickingTogglesState (false);
@@ -48,7 +47,6 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
     basicTabButton.onClick  = [this] { showPage (0); };
     detailTabButton.onClick = [this] { showPage (1); };
 
-    // --- Presets ---------------------------------------------------------------
     presetLabel.setText (jp("プリセット"), juce::dontSendNotification);
     presetLabel.setFont (japaneseFont (11.0f));
     presetLabel.setJustificationType (juce::Justification::centredRight);
@@ -77,7 +75,6 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
     addAndMakeVisible (revertButton);
     revertButton.setVisible (false);
 
-    // --- Basic page knobs -------------------------------------------------------
     setUpKnob (rateKnob, params::rateID, jp("速さ"), jp("1周する時間"),
                jp("音像が中心軸を1周するのにかかる時間です。ゆっくりだと自然、速いと目立ちます。"));
     setUpKnob (radiusKnob, params::radiusID, jp("広がり"), jp("左右の幅"),
@@ -87,7 +84,6 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
     setUpKnob (mixKnob, params::mixID, jp("効果量"), jp("原音とのブレンド"),
                jp("エフェクト音の量です。0%で原音そのまま。30〜40%が実用的な範囲です。"));
 
-    // --- Detail page ------------------------------------------------------------
     setUpKnob (symmetryKnob, params::symmetryID, jp("対称性"), jp("中心の固定度"),
                jp("100%で2つの音像が正確に反対側を保ち、中心が完全に固定されます。")
                + jp("下げるとBの速度がわずかに変わり、中心が生き物のように漂い始めます。"));
@@ -118,10 +114,14 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
     divisionAttachment = std::make_unique<ComboAttachment> (processorRef.apvts, params::divisionID, divisionBox);
 
     autoGainButton.setButtonText (jp("音量自動補正"));
-    autoGainButton.setTooltip (jp("エフェクト音の音量を原音に自動で合わせます。")
-                               + jp("オンなら「効果量」を動かしても体感音量が変わらないので、比較しやすくなります。"));
+    autoGainButton.setTooltip (jp("動くDNA成分の音量を原音に近づけます。ステレオ保持の横幅は過剰に増幅しません。"));
     addAndMakeVisible (autoGainButton);
     autoGainAttachment = std::make_unique<ButtonAttachment> (processorRef.apvts, params::autoGainID, autoGainButton);
+
+    softBypassButton.setButtonText (jp("ソフトバイパス"));
+    softBypassButton.setTooltip (jp("内部の回転を止めず、60msで原音へ滑らかに戻します。演奏中の比較やオートメーション向けです。"));
+    addAndMakeVisible (softBypassButton);
+    softBypassAttachment = std::make_unique<ButtonAttachment> (processorRef.apvts, params::softBypassID, softBypassButton);
 
     nullCoreButton.setButtonText (jp("NULL CORE (実験的)"));
     nullCoreButton.setColour (juce::ToggleButton::textColourId, dnaorbit::ui::DnaLookAndFeel::warningColour());
@@ -131,9 +131,6 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
     addAndMakeVisible (nullCoreButton);
     nullCoreAttachment = std::make_unique<ButtonAttachment> (processorRef.apvts, params::nullCoreID, nullCoreButton);
 
-    // --- Readouts ---------------------------------------------------------------
-    // Monospaced with a fixed sign column: digit-width jitter at high refresh
-    // rates is the classic cheap-plugin tell.
     readoutLabel.setFont (japaneseFont (11.5f));
     readoutLabel.setColour (juce::Label::textColourId,
                             dnaorbit::ui::DnaLookAndFeel::textColour().withAlpha (0.85f));
@@ -151,8 +148,6 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
     addAndMakeVisible (warningLabel);
     warningLabel.setVisible (false);
 
-    // Follow the parameter, not the button, so host automation and preset loads
-    // keep the warning in sync.
     if (auto* nullCoreParam = processorRef.apvts.getParameter (params::nullCoreID))
     {
         nullCoreWatcher = std::make_unique<juce::ParameterAttachment> (
@@ -236,6 +231,7 @@ void DNAOrbitAudioProcessorEditor::showPage (int page)
     divisionBox.setVisible (! basic);
     divisionLabel.setVisible (! basic);
     autoGainButton.setVisible (! basic);
+    softBypassButton.setVisible (! basic);
     nullCoreButton.setVisible (! basic);
 
     presetBox.setVisible (basic);
@@ -261,8 +257,6 @@ void DNAOrbitAudioProcessorEditor::timerCallback()
                            locked ? dnaorbit::ui::DnaLookAndFeel::centreLockedColour()
                                   : dnaorbit::ui::DnaLookAndFeel::centreDriftColour());
 
-    // Show the +/- physics literally: the two pan positions and their midpoint.
-    // 4 decimals on the centre so it is visibly zero rather than merely rounded.
     const auto signed3 = [] (float value)
     {
         return juce::String (value >= 0.0f ? "+" : "-") + juce::String (std::abs (value), 3);
@@ -277,9 +271,6 @@ void DNAOrbitAudioProcessorEditor::timerCallback()
 
     readoutLabel.setText (text, juce::dontSendNotification);
 
-    // Modified/Revert: once anything drifts from the picked preset's stored
-    // values, offer to snap back to it. Cheap enough to just recompute on
-    // this already-ticking timer rather than wiring up 12 parameter listeners.
     if (currentPage == 0 && currentPresetIndex >= 0 && currentPresetIndex < dnaorbit::presets::numPresets)
     {
         const bool modified = ! dnaorbit::presets::matchesCurrentState (
@@ -296,7 +287,6 @@ void DNAOrbitAudioProcessorEditor::paint (juce::Graphics& g)
 {
     g.fillAll (dnaorbit::ui::DnaLookAndFeel::backgroundColour());
 
-    // Panel behind the control area.
     auto area = getLocalBounds().reduced (12);
     area.removeFromTop (44);
     const auto controlArea = area.removeFromBottom (128);
@@ -327,7 +317,6 @@ void DNAOrbitAudioProcessorEditor::resized()
 
     auto area = getLocalBounds().reduced (12);
 
-    // --- Top bar ---------------------------------------------------------------
     auto topBar = area.removeFromTop (44);
     auto titleArea = topBar.removeFromLeft (250);
     titleLabel.setBounds (titleArea.removeFromTop (24));
@@ -345,7 +334,6 @@ void DNAOrbitAudioProcessorEditor::resized()
     presetArea.removeFromLeft (6);
     presetBox.setBounds (presetArea);
 
-    // --- Control area ----------------------------------------------------------
     auto controlArea = area.removeFromBottom (128).reduced (8);
 
     if (currentPage == 0)
@@ -356,22 +344,23 @@ void DNAOrbitAudioProcessorEditor::resized()
     {
         auto toggleColumn = controlArea.removeFromRight
             (juce::jmin (240, controlArea.getWidth() / 3));
-        toggleColumn.reduce (4, 2);
+        toggleColumn.reduce (4, 0);
 
-        auto syncRow = toggleColumn.removeFromTop (26);
+        auto syncRow = toggleColumn.removeFromTop (24);
         syncButton.setBounds (syncRow.removeFromLeft (110));
         divisionLabel.setBounds (syncRow.removeFromLeft (34));
         divisionBox.setBounds (syncRow);
 
-        toggleColumn.removeFromTop (4);
-        autoGainButton.setBounds (toggleColumn.removeFromTop (26));
-        toggleColumn.removeFromTop (4);
-        nullCoreButton.setBounds (toggleColumn.removeFromTop (26));
+        toggleColumn.removeFromTop (2);
+        autoGainButton.setBounds (toggleColumn.removeFromTop (24));
+        toggleColumn.removeFromTop (2);
+        softBypassButton.setBounds (toggleColumn.removeFromTop (24));
+        toggleColumn.removeFromTop (2);
+        nullCoreButton.setBounds (toggleColumn.removeFromTop (24));
 
         layOutKnobRow (controlArea, { &symmetryKnob, &twistKnob, &coreKnob, &outputKnob, &stereoPreserveKnob });
     }
 
-    // --- Centre: readouts | 3D helix ------------------------------------------
     auto centreArea = area;
     auto readoutColumn = centreArea.removeFromLeft (juce::jmin (140, centreArea.getWidth() / 5));
 
