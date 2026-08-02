@@ -206,19 +206,19 @@ namespace dnaorbit::dsp
             const float dryL = sampleInL;
             const float dryR = sampleInR;
 
-            // --- Stereo Preserve: M/S source split for the two strands -----------
-            // mid/side of a mono-duplicated input (stereoIn == false) always
-            // gives side == 0, so sourceA == sourceB == mid regardless of
-            // stereoPreserve - mono input is unaffected by this parameter.
-            // At stereoPreserve == 0, sourceA == sourceB == mid for ANY input,
-            // which is exactly the old shared-mono-downmix Wet source: this is
-            // what makes stereoPreserve == 0 reproduce the schema-1 sound
-            // (including anti-phase input collapsing Wet to silence), see
-            // Tests/BaselineRegressionTests.cpp.
+            // --- Stereo Preserve: centred DNA orbit + stationary Side bed ---------
+            // The moving DNA itself is always driven by the common Mid signal.
+            // Therefore both antipodal strands carry the same programme material:
+            // Symmetry 100% means not only a geometric midpoint of zero, but also
+            // avoids content-dependent left/right bias caused by feeding unrelated
+            // L/R material into the two moving strands.
+            //
+            // The original stereo identity is retained separately as a pure Side
+            // bed (L += p*S, R -= p*S). A pure Side signal has equal energy on both
+            // output channels and zero Mid, so it preserves width without moving
+            // the DNA's centre. At p=0 this is exactly the schema-1 signal path.
             const float mid  = stereoIn ? 0.5f * (sampleInL + sampleInR) : sampleInL;
             const float side = stereoIn ? 0.5f * (sampleInL - sampleInR) : 0.0f;
-            const float sourceA = mid + stereoPreserve * side;
-            const float sourceB = mid - stereoPreserve * side;
 
             // --- Orbit angle update -------------------------------------------------
             const double incA = orbitmath::angularIncrement ((double) rateHz, sampleRate);
@@ -276,7 +276,7 @@ namespace dnaorbit::dsp
             const float backGainA = dbToGain (gainDbA);
             const float cutoffA = frontCutoffHz + (backCutoffHz - frontCutoffHz) * (float) backAmountA * depth;
             lowPassA.setCutoffHz (cutoffA);
-            const float filteredA = lowPassA.processSample (sourceA * backGainA);
+            const float filteredA = lowPassA.processSample (mid * backGainA);
 
             const float backDelayMsA = maxBackDelayMs * (float) backAmountA * depth;
             const float delaySamplesA = std::clamp ((backDelayMsA * 0.001f) * (float) sampleRate, 0.0f, maxDelaySamplesStored - 1.0f);
@@ -295,7 +295,7 @@ namespace dnaorbit::dsp
             const float backGainB = dbToGain (gainDbB);
             const float cutoffB = frontCutoffHz + (backCutoffHz - frontCutoffHz) * (float) backAmountB * depth;
             lowPassB.setCutoffHz (cutoffB);
-            const float filteredB = lowPassB.processSample (sourceB * backGainB);
+            const float filteredB = lowPassB.processSample (mid * backGainB);
 
             const float backDelayMsB = maxBackDelayMs * (float) backAmountB * depth;
             const float delaySamplesB = std::clamp (((backDelayMsB + twistMs) * 0.001f) * (float) sampleRate, 0.0f, maxDelaySamplesStored - 1.0f);
@@ -308,45 +308,23 @@ namespace dnaorbit::dsp
             const float strandBL = delayedB * (float) gainsB.left * strandGain;
             const float strandBR = delayedB * (float) gainsB.right * strandGain;
 
-            // --- Wet sum, Core, NULL CORE --------------------------------------------
-            float wetL = strandAL + strandBL;
-            float wetR = strandAR + strandBR;
+            // --- Centred orbit wet + Core --------------------------------------------
+            float wetL = strandAL + strandBL + mid * core;
+            float wetR = strandAR + strandBR + mid * core;
 
-            // Core follows Stereo Preserve too: lerp(mid, L, stereoPreserve) is
-            // exactly sourceA (and lerp(mid, R, stereoPreserve) is sourceB), so
-            // Core's image width matches the strands' rather than always being
-            // a mono blob re-duplicated to both channels.
-            wetL += sourceA * core;
-            wetR += sourceB * core;
-
-            const auto nulled = nullCoreProcess (wetL, wetR);
-            wetL += (nulled.left  - wetL) * nullCoreAmount;
-            wetR += (nulled.right - wetR) * nullCoreAmount;
-
-            // --- Wet level matching ---------------------------------------------------
-            // Deterministic (not signal-following, so it cannot pump): predict the
-            // wet path's gain purely from the current geometry and cancel it, so
-            // moving Mix does not change the perceived loudness.
-            //
-            // Each channel carries three copies of the same source at different
-            // delays: strand A (delayed dA), strand B (delayed dB) and the Core
-            // signal (undelayed). Copies at a similar delay add in AMPLITUDE;
-            // once their delays differ by more than a few ms they add in POWER.
-            // So sum the powers plus the pairwise cross terms, each weighted by a
-            // coherence factor from that pair's delay difference:
-            //
-            //   P = SUM(gi^2) + 2 * SUM over i<j of gi*gj*coherence(|di - dj|)
-            //
-            // Getting the Core cross terms right matters: Core is undelayed, so it
-            // sums coherently with whichever strand is currently near zero delay.
+            // --- Geometry-based Mid-orbit level matching -----------------------------
+            // This prediction remains valid because the two strands and Core are
+            // deliberately driven by the same Mid source. The Side bed is added only
+            // after this compensation, so original stereo width is neither boosted by
+            // the orbit make-up gain nor included in a false same-source assumption.
             const float msPerSample = 1000.0f / (float) sampleRate;
             const auto coherence = [] (float deltaMs) { return std::exp (-std::abs (deltaMs) / 4.0f); };
 
             const float delayMsA = delaySamplesA * msPerSample;
             const float delayMsB = delaySamplesB * msPerSample;
             const float cAB = coherence (delayMsA - delayMsB);
-            const float cAC = coherence (delayMsA);   // strand A against the undelayed Core
-            const float cBC = coherence (delayMsB);   // strand B against the undelayed Core
+            const float cAC = coherence (delayMsA);
+            const float cBC = coherence (delayMsB);
 
             const float aL = strandGain * backGainA * (float) gainsA.left;
             const float aR = strandGain * backGainA * (float) gainsA.right;
@@ -358,18 +336,25 @@ namespace dnaorbit::dsp
             const float powerR = aR * aR + bR * bR + core * core
                                + 2.0f * (aR * bR * cAB + aR * core * cAC + bR * core * cBC);
 
-            // Reference: a coherent unit input has dry power 1^2 + 1^2 = 2 across the pair.
             const float wetPower = powerL + powerR;
             const float makeupTarget = wetPower > 1.0e-9f
                                      ? std::clamp (std::sqrt (2.0f / wetPower), 1.0f / maxWetMakeupGain, maxWetMakeupGain)
                                      : 1.0f;
-
-            // NULL CORE is deliberately NOT compensated: that mode is meant to be able
-            // to almost vanish in mono, and for near-mono material the required boost
-            // would be unbounded. The clamp above is the safety net.
             const float wetMakeup = 1.0f + (makeupTarget - 1.0f) * autoGainAmount;
             wetL *= wetMakeup;
             wetR *= wetMakeup;
+
+            // Preserve the original Side independently of the orbit. This fixes the
+            // anti-phase-silence failure while keeping the moving DNA content-centred.
+            const float sideBed = side * stereoPreserve;
+            wetL += sideBed;
+            wetR -= sideBed;
+
+            // NULL CORE remains an explicitly Side-only creative mode. Apply it after
+            // the preserve bed so the definition stays literal for the complete Wet.
+            const auto nulled = nullCoreProcess (wetL, wetR);
+            wetL += (nulled.left  - wetL) * nullCoreAmount;
+            wetR += (nulled.right - wetR) * nullCoreAmount;
 
             // --- Dry/Wet mix, output gain ---------------------------------------------
             const auto dryWet = equalPowerMix (mix);
