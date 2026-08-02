@@ -185,7 +185,7 @@ namespace dnaorbit::ui
         const bool on = button.getToggleState();
         const float alpha = button.isEnabled() ? 1.0f : 0.34f;
         const bool warningStyle = button.getName().containsIgnoreCase ("NULL")
-                               || button.getName().containsIgnoreCase ("バイパス");
+                               || button.getName().containsIgnoreCase (jp ("バイパス"));
         const auto activeColour = warningStyle ? warningColour() : strandBColour();
 
         const float switchWidth = juce::jlimit (30.0f, 38.0f, area.getHeight() * 1.58f);
