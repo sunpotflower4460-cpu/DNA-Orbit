@@ -121,6 +121,9 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
     presetStateLabel.setJustificationType (juce::Justification::centred);
     presetStateLabel.setColour (juce::Label::textColourId,
                                 ui::DnaLookAndFeel::centreDriftColour());
+    presetStateLabel.setPillColours (
+        ui::DnaLookAndFeel::centreDriftColour().withAlpha (0.12f),
+        ui::DnaLookAndFeel::centreDriftColour().withAlpha (0.42f), 7.0f);
     presetStateLabel.setInterceptsMouseClicks (false, false);
     addAndMakeVisible (presetStateLabel);
     presetStateLabel.setVisible (false);
@@ -218,12 +221,18 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
     addAndMakeVisible (guideLabel);
 
     configureOverlayLabel (statusLabel, 11.0f, true, juce::Justification::centred);
+    statusLabel.setPillColours (
+        ui::DnaLookAndFeel::backgroundColour().withAlpha (0.78f),
+        ui::DnaLookAndFeel::centreLockedColour().withAlpha (0.30f));
     addAndMakeVisible (statusLabel);
 
     configureOverlayLabel (diagnosticLabel, 10.0f, false,
                            juce::Justification::centredRight);
     diagnosticLabel.setColour (juce::Label::textColourId,
                                ui::DnaLookAndFeel::mutedTextColour());
+    diagnosticLabel.setPillColours (
+        ui::DnaLookAndFeel::backgroundColour().withAlpha (0.72f),
+        ui::DnaLookAndFeel::borderColour().withAlpha (0.28f));
     addAndMakeVisible (diagnosticLabel);
 
     warningLabel.setText (jp("NULL CORE：モノラルでは音が消える可能性があります"),
@@ -231,10 +240,16 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
     configureOverlayLabel (warningLabel, 10.5f, true, juce::Justification::centred);
     warningLabel.setColour (juce::Label::textColourId,
                             ui::DnaLookAndFeel::warningColour());
+    warningLabel.setPillColours (
+        ui::DnaLookAndFeel::warningColour().withAlpha (0.13f),
+        ui::DnaLookAndFeel::warningColour().withAlpha (0.48f), 7.0f);
     addAndMakeVisible (warningLabel);
     warningLabel.setVisible (false);
 
+    helixView.setName (jp("DNA軌道表示"));
+    helixView.setTooltip (jp("二本の音像、中心軸、左右・前後の軌道をリアルタイム表示します。"));
     addAndMakeVisible (helixView);
+    helixView.toBack();
 
     if (auto* nullCoreParam = processorRef.apvts.getParameter (params::nullCoreID))
     {
@@ -437,9 +452,12 @@ void DNAOrbitAudioProcessorEditor::timerCallback()
     if (visual.hostPhaseLocked)
         status << "  •  HOST LOCK";
     statusLabel.setText (status, juce::dontSendNotification);
-    statusLabel.setColour (juce::Label::textColourId,
-                           axisLocked ? ui::DnaLookAndFeel::centreLockedColour()
-                                      : ui::DnaLookAndFeel::centreDriftColour());
+    const auto statusColour = axisLocked ? ui::DnaLookAndFeel::centreLockedColour()
+                                         : ui::DnaLookAndFeel::centreDriftColour();
+    statusLabel.setColour (juce::Label::textColourId, statusColour);
+    statusLabel.setPillColours (
+        ui::DnaLookAndFeel::backgroundColour().withAlpha (0.78f),
+        statusColour.withAlpha (0.34f));
 
     const auto signed2 = [] (float value)
     {
@@ -509,42 +527,9 @@ void DNAOrbitAudioProcessorEditor::paint (juce::Graphics& g)
     {
         g.setFont (japaneseFont (10.0f, true));
         g.setColour (ui::DnaLookAndFeel::strandAColour().withAlpha (0.78f));
-        g.drawText (jp("ESSENTIAL CONTROLS"),
+        g.drawText ("ESSENTIAL CONTROLS",
                     controlPanelBounds.reduced (14, 8).removeFromTop (16),
                     juce::Justification::centredLeft);
-    }
-
-    if (statusLabel.isVisible())
-    {
-        g.setColour (ui::DnaLookAndFeel::backgroundColour().withAlpha (0.76f));
-        g.fillRoundedRectangle (statusLabel.getBounds().toFloat(), 8.0f);
-        g.setColour ((helixView.isAxisLocked()
-                          ? ui::DnaLookAndFeel::centreLockedColour()
-                          : ui::DnaLookAndFeel::centreDriftColour()).withAlpha (0.34f));
-        g.drawRoundedRectangle (statusLabel.getBounds().toFloat().reduced (0.5f), 8.0f, 1.0f);
-    }
-
-    if (diagnosticLabel.isVisible())
-    {
-        g.setColour (ui::DnaLookAndFeel::backgroundColour().withAlpha (0.70f));
-        g.fillRoundedRectangle (diagnosticLabel.getBounds().toFloat(), 8.0f);
-    }
-
-    if (warningLabel.isVisible())
-    {
-        g.setColour (ui::DnaLookAndFeel::warningColour().withAlpha (0.12f));
-        g.fillRoundedRectangle (warningLabel.getBounds().toFloat(), 7.0f);
-        g.setColour (ui::DnaLookAndFeel::warningColour().withAlpha (0.48f));
-        g.drawRoundedRectangle (warningLabel.getBounds().toFloat().reduced (0.5f), 7.0f, 1.0f);
-    }
-
-    if (presetStateLabel.isVisible())
-    {
-        g.setColour (ui::DnaLookAndFeel::centreDriftColour().withAlpha (0.12f));
-        g.fillRoundedRectangle (presetStateLabel.getBounds().toFloat(), 7.0f);
-        g.setColour (ui::DnaLookAndFeel::centreDriftColour().withAlpha (0.42f));
-        g.drawRoundedRectangle (presetStateLabel.getBounds().toFloat().reduced (0.5f),
-                                7.0f, 1.0f);
     }
 }
 
