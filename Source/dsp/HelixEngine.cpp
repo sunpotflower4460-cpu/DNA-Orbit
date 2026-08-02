@@ -48,6 +48,7 @@ namespace dnaorbit::dsp
         symmetryLocked = true;
         resyncStartError = 0.0;
         resyncSamplesRemaining = 0;
+        dryWetCorrelationEstimate = 0.0f;
 
         lowPassA.reset();
         lowPassB.reset();
@@ -162,6 +163,7 @@ namespace dnaorbit::dsp
         const float* inR = stereoIn ? buffer.getReadPointer (1) : nullptr;
 
         double sumLL = 0.0, sumRR = 0.0, sumLR = 0.0;
+        double sumDryPower = 0.0, sumWetPower = 0.0, sumDryWet = 0.0;
 
         for (int n = 0; n < numSamples; ++n)
         {
@@ -302,12 +304,26 @@ namespace dnaorbit::dsp
             wetL += (nulled.left  - wetL) * nullCoreAmount;
             wetR += (nulled.right - wetR) * nullCoreAmount;
 
-            const auto dryWet = equalPowerMix (mix);
-            float processedL = (dryWet.dry * dryL + dryWet.wet * wetL) * outGain;
-            float processedR = (dryWet.dry * dryR + dryWet.wet * wetR) * outGain;
+            // Measure Dry/Wet correlation before the main mix. The estimate is
+            // applied on the next block and smoothed over 250 ms, preventing a
+            // sample-following gain pump while adapting to programme character.
+            sumDryPower += (double) dryL * dryL + (double) dryR * dryR;
+            sumWetPower += (double) wetL * wetL + (double) wetR * wetR;
+            sumDryWet += (double) dryL * wetL + (double) dryR * wetR;
 
-            // Soft Bypass is deliberately linear: its endpoint must be exact Dry,
-            // and an equal-power law could create a correlated-signal gain bump.
+            const auto dryWet = equalPowerMix (mix);
+            const float predictedPower = std::clamp (
+                dryWet.dry * dryWet.dry + dryWet.wet * dryWet.wet
+                    + 2.0f * dryWetCorrelationEstimate * dryWet.dry * dryWet.wet,
+                minMixPredictedPower, maxMixPredictedPower);
+            const float mixNormTarget = 1.0f / std::sqrt (predictedPower);
+            const float mixNorm = 1.0f + (mixNormTarget - 1.0f) * autoGainAmount;
+
+            float processedL = (dryWet.dry * dryL + dryWet.wet * wetL) * mixNorm * outGain;
+            float processedR = (dryWet.dry * dryR + dryWet.wet * wetR) * mixNorm * outGain;
+
+            // Soft Bypass is linear because Dry and processed output are often
+            // correlated; an equal-power bypass law could create another bump.
             float finalL = processedL + (dryL - processedL) * softBypass;
             float finalR = processedR + (dryR - processedR) * softBypass;
 
@@ -342,6 +358,18 @@ namespace dnaorbit::dsp
 
         if (numSamples > 0)
         {
+            const double blockSeconds = (double) numSamples / sampleRate;
+            const float correlationAlpha = (float) (1.0 - std::exp (-blockSeconds / mixCorrelationTimeSeconds));
+
+            float measuredDryWet = 0.0f;
+            const double dryWetDenom = std::sqrt (sumDryPower * sumWetPower);
+            if (dryWetDenom > 1.0e-12)
+                measuredDryWet = (float) std::clamp (sumDryWet / dryWetDenom, -1.0, 1.0);
+
+            dryWetCorrelationEstimate += correlationAlpha * (measuredDryWet - dryWetCorrelationEstimate);
+            if (! std::isfinite (dryWetCorrelationEstimate))
+                dryWetCorrelationEstimate = 0.0f;
+
             const double invN = 1.0 / (double) numSamples;
             const double meanLL = sumLL * invN;
             const double meanRR = sumRR * invN;
