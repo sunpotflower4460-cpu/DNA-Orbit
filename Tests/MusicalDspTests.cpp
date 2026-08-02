@@ -141,6 +141,25 @@ namespace
 
         void runTest() override
         {
+            beginTest ("Bass Anchor Off is an exact sample-level bypass");
+            {
+                LinkwitzRileyCrossover crossover;
+                crossover.prepare (192000.0);
+                crossover.setCutoffHz (20.0f);
+                juce::Random random { 81027 };
+
+                for (int n = 0; n < 4096; ++n)
+                {
+                    const float input = random.nextFloat() * 2.0f - 1.0f;
+                    float low = 1.0f, high = 0.0f;
+                    crossover.processSample (input, low, high);
+                    expectWithinAbsoluteError (low, 0.0f, 0.0f,
+                                               "Off must not leak any signal into the low branch");
+                    expectWithinAbsoluteError (high, input, 0.0f,
+                                               "Off must copy the input bit-transparently to the high branch");
+                }
+            }
+
             beginTest ("Linkwitz-Riley low and high outputs recombine with flat magnitude");
             for (const double frequency : { 60.0, 120.0, 1000.0, 5000.0 })
                 expectWithinAbsoluteError (measureCrossoverSum (frequency), 1.0, 0.015,
