@@ -5,18 +5,14 @@
 #include "Parameters.h"
 
 /**
- * Factory presets defined as a point in the FULL 12-parameter space (not just
- * the handful of knobs shown on the Basic tab), so applying one is
- * deterministic: the result depends only on which preset was picked, never on
- * whatever Sync/Division/Output/Auto Gain happened to be left at beforehand.
- *
- * Kept independent of PluginEditor so it can be unit-tested without a GUI.
+ * Factory presets define the complete audio state so applying one never
+ * depends on values left behind by a previous preset or host automation.
  */
 namespace dnaorbit::presets
 {
     struct Preset
     {
-        const char* name; // UTF-8; wrap with dnaorbit::ui::jp() before display.
+        const char* name;
         float rateHz;
         bool  sync;
         int   division;
@@ -25,26 +21,20 @@ namespace dnaorbit::presets
         float mix;
         float output;
         bool  autoGain;
-        // Matches the shipped product default (Parameters.h) for every
-        // factory preset; not perceptually re-tuned per preset since that
-        // needs real listening (see MANUAL_REQUIRED.md), not a guess.
         float stereoPreserve;
+        bool  softBypass;
     };
 
     inline const Preset presets[] = {
-        { "ボーカルを広げる", 0.10f, false, 2,  75.0f, 45.0f, 100.0f, 4.0f, 10.0f, false, 30.0f, 0.0f, true, 70.0f },
-        { "パッドを回す",     0.18f, false, 2, 100.0f, 65.0f, 100.0f, 7.0f, 10.0f, false, 45.0f, 0.0f, true, 70.0f },
-        { "ギターに揺らぎ",   0.08f, false, 2,  80.0f, 60.0f,  88.0f, 6.0f, 15.0f, false, 40.0f, 0.0f, true, 70.0f },
-        { "シンセを速く回す", 0.60f, false, 2,  90.0f, 70.0f, 100.0f, 8.0f,  0.0f, false, 40.0f, 0.0f, true, 70.0f },
-        { "実験:中心を消す", 0.04f, false, 2, 100.0f, 50.0f, 100.0f, 8.0f,  0.0f, true,  30.0f, 0.0f, true, 70.0f },
+        { "ボーカルを広げる", 0.10f, false, 2,  75.0f, 45.0f, 100.0f, 4.0f, 10.0f, false, 30.0f, 0.0f, true, 70.0f, false },
+        { "パッドを回す",     0.18f, false, 2, 100.0f, 65.0f, 100.0f, 7.0f, 10.0f, false, 45.0f, 0.0f, true, 70.0f, false },
+        { "ギターに揺らぎ",   0.08f, false, 2,  80.0f, 60.0f,  88.0f, 6.0f, 15.0f, false, 40.0f, 0.0f, true, 70.0f, false },
+        { "シンセを速く回す", 0.60f, false, 2,  90.0f, 70.0f, 100.0f, 8.0f,  0.0f, false, 40.0f, 0.0f, true, 70.0f, false },
+        { "実験:中心を消す", 0.04f, false, 2, 100.0f, 50.0f, 100.0f, 8.0f,  0.0f, true,  30.0f, 0.0f, true, 70.0f, false },
     };
 
     inline constexpr int numPresets = (int) (sizeof (presets) / sizeof (presets[0]));
 
-    /**
-     * Sets every one of the 12 parameters from the preset, so the resulting
-     * sound never depends on state the preset didn't explicitly specify.
-     */
     inline void apply (juce::AudioProcessorValueTreeState& apvts, const Preset& preset)
     {
         auto set = [&apvts] (const char* id, float actualValue)
@@ -66,14 +56,9 @@ namespace dnaorbit::presets
         set (params::outputID, preset.output);
         set (params::autoGainID, preset.autoGain ? 1.0f : 0.0f);
         set (params::stereoPreserveID, preset.stereoPreserve);
+        set (params::softBypassID, preset.softBypass ? 1.0f : 0.0f);
     }
 
-    /**
-     * True if every parameter currently sits at the preset's stored value
-     * (within a small tolerance for float round-trip through the
-     * normalised 0-1 range). Used to drive a "Modified" indicator: once the
-     * user nudges anything after picking a preset, this goes false.
-     */
     inline bool matchesCurrentState (const juce::AudioProcessorValueTreeState& apvts, const Preset& preset) noexcept
     {
         auto isClose = [&apvts] (const char* id, float actual, float tolerance = 0.05f)
@@ -99,6 +84,7 @@ namespace dnaorbit::presets
             && isClose (params::mixID, preset.mix)
             && isClose (params::outputID, preset.output)
             && isOn (params::autoGainID, preset.autoGain)
-            && isClose (params::stereoPreserveID, preset.stereoPreserve);
+            && isClose (params::stereoPreserveID, preset.stereoPreserve)
+            && isOn (params::softBypassID, preset.softBypass);
     }
 }
