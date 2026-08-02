@@ -19,6 +19,7 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
     : AudioProcessorEditor (&p), processorRef (p), helixView (p.getEngine())
 {
     setLookAndFeel (&lookAndFeel);
+    setWantsKeyboardFocus (true);
 
     titleLabel.setText ("DNA ORBIT", juce::dontSendNotification);
     titleLabel.setFont (japaneseFont (21.0f, true));
@@ -36,12 +37,15 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
     for (auto* button : { &basicTabButton, &detailTabButton })
     {
         button->setClickingTogglesState (false);
+        button->setWantsKeyboardFocus (true);
         button->setColour (juce::TextButton::buttonColourId, ui::DnaLookAndFeel::panelColour());
         button->setColour (juce::TextButton::textColourOffId, ui::DnaLookAndFeel::textColour());
         addAndMakeVisible (*button);
     }
     basicTabButton.setButtonText (jp("基本"));
+    basicTabButton.setName (jp("基本タブ"));
     detailTabButton.setButtonText (jp("詳細"));
+    detailTabButton.setName (jp("詳細タブ"));
     basicTabButton.onClick = [this] { showPage (0); };
     detailTabButton.onClick = [this] { showPage (1); };
 
@@ -51,6 +55,8 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
     presetLabel.setColour (juce::Label::textColourId, ui::DnaLookAndFeel::textColour());
     addAndMakeVisible (presetLabel);
 
+    presetBox.setName (jp("プリセット"));
+    presetBox.setWantsKeyboardFocus (true);
     presetBox.setTextWhenNothingSelected (jp("選んでください"));
     for (int i = 0; i < presets::numPresets; ++i)
         presetBox.addItem (jp (presets::presets[i].name), i + 1);
@@ -64,6 +70,7 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
     };
 
     revertButton.setButtonText (jp("元に戻す"));
+    revertButton.setName (jp("プリセットへ戻す"));
     revertButton.setTooltip (jp("選択したプリセットの全設定へ戻します。"));
     revertButton.onClick = [this]
     {
@@ -98,7 +105,9 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
                jp("RetriggerとHost Lockの軌道開始角度です。"));
 
     syncButton.setButtonText (jp("テンポ同期"));
+    syncButton.setName (jp("テンポ同期"));
     syncButton.setTooltip (jp("BPM・拍子・分割に合わせて回転周期を決めます。"));
+    syncButton.setWantsKeyboardFocus (true);
     addAndMakeVisible (syncButton);
     syncAttachment = std::make_unique<ButtonAttachment> (processorRef.apvts,
                                                           params::syncID, syncButton);
@@ -106,34 +115,37 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
     setUpChoice (divisionBox, divisionLabel, params::syncDivisionChoices,
                  jp("分割"), jp("一周に使う小節または音価です。"),
                  divisionAttachment, params::divisionID);
-    setUpChoice (characterBox, characterLabel,
-                 { "Natural", "Vivid", "Deep" },
+    setUpChoice (characterBox, characterLabel, params::characterChoices,
                  jp("質感"), jp("前後の暗さ・減衰・時間差の性格です。"),
                  characterAttachment, params::characterID);
-    setUpChoice (phaseModeBox, phaseModeLabel,
-                 { "Free", "Retrigger", "Host Lock" },
+    setUpChoice (phaseModeBox, phaseModeLabel, params::phaseModeChoices,
                  jp("位相"), jp("Host Lockは曲位置から軌道を再現します。Retriggerは再生開始で戻ります。"),
                  phaseModeAttachment, params::phaseModeID);
-    setUpChoice (directionBox, directionLabel,
-                 { "CW", "CCW" },
+    setUpChoice (directionBox, directionLabel, params::directionChoices,
                  jp("方向"), jp("回転方向を反転します。"),
                  directionAttachment, params::directionID);
 
     autoGainButton.setButtonText (jp("音量自動補正"));
+    autoGainButton.setName (jp("音量自動補正"));
     autoGainButton.setTooltip (jp("Wet音量とDry/Wet相関を補正し、公平に比較しやすくします。"));
+    autoGainButton.setWantsKeyboardFocus (true);
     addAndMakeVisible (autoGainButton);
     autoGainAttachment = std::make_unique<ButtonAttachment> (processorRef.apvts,
                                                               params::autoGainID,
                                                               autoGainButton);
 
     softBypassButton.setButtonText (jp("ソフトバイパス"));
+    softBypassButton.setName (jp("ソフトバイパス"));
     softBypassButton.setTooltip (jp("内部状態を動かしたまま、60msで正確な原音へ戻します。"));
+    softBypassButton.setWantsKeyboardFocus (true);
     addAndMakeVisible (softBypassButton);
     softBypassAttachment = std::make_unique<ButtonAttachment> (processorRef.apvts,
                                                                 params::softBypassID,
                                                                 softBypassButton);
 
     nullCoreButton.setButtonText (jp("NULL CORE (実験的)"));
+    nullCoreButton.setName (jp("NULL CORE 実験モード"));
+    nullCoreButton.setWantsKeyboardFocus (true);
     nullCoreButton.setColour (juce::ToggleButton::textColourId,
                               ui::DnaLookAndFeel::warningColour());
     nullCoreButton.setColour (juce::ToggleButton::tickColourId,
@@ -200,9 +212,15 @@ void DNAOrbitAudioProcessorEditor::setUpKnob (Knob& knob, const juce::String& pa
                                               const juce::String& hint,
                                               const juce::String& tooltip)
 {
+    knob.slider.setName (name);
     knob.slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 76, 17);
     knob.slider.setTooltip (tooltip);
     knob.slider.setWantsKeyboardFocus (true);
+
+    if (auto* parameter = processorRef.apvts.getParameter (paramID))
+        knob.slider.setDoubleClickReturnValue (
+            true, parameter->convertFrom0to1 (parameter->getDefaultValue()));
+
     addAndMakeVisible (knob.slider);
 
     knob.nameLabel.setText (name, juce::dontSendNotification);
@@ -235,6 +253,7 @@ void DNAOrbitAudioProcessorEditor::setUpChoice (
     label.setTooltip (tooltip);
     addAndMakeVisible (label);
 
+    box.setName (labelText);
     box.addItemList (items, 1);
     box.setTooltip (tooltip);
     box.setWantsKeyboardFocus (true);
@@ -296,8 +315,13 @@ void DNAOrbitAudioProcessorEditor::timerCallback()
     const auto visual = processorRef.getEngine().getVisualState();
     const bool syncOn = processorRef.apvts.getRawParameterValue (params::syncID)->load() > 0.5f;
 
+    rateKnob.slider.setEnabled (! syncOn);
+    rateKnob.nameLabel.setEnabled (! syncOn);
+    rateKnob.hintLabel.setEnabled (! syncOn);
     divisionBox.setEnabled (syncOn);
+    divisionLabel.setEnabled (syncOn);
     phaseModeBox.setEnabled (syncOn);
+    phaseModeLabel.setEnabled (syncOn);
     startPhaseKnob.slider.setEnabled (syncOn);
     startPhaseKnob.nameLabel.setEnabled (syncOn);
     startPhaseKnob.hintLabel.setEnabled (syncOn);
