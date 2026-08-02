@@ -97,9 +97,9 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
                jp("中心軸に元の音をどれだけ残すかです。0%で中心が空洞、上げると中央に芯が現れます。"));
     setUpKnob (outputKnob, params::outputID, jp("出力"), jp("最終音量"),
                jp("最終的な出力音量の微調整です。"));
-    setUpKnob (stereoPreserveKnob, params::stereoPreserveID, jp("ステレオ保持"), jp("左右の情報量"),
-               jp("エフェクト音に元のステレオ感をどれだけ残すかです。0%は中央成分のみ、")
-               + jp("100%で元の左右がそのままA/Bに渡ります。逆位相の素材でも音が消えにくくなります。"));
+    setUpKnob (stereoPreserveKnob, params::stereoPreserveID, jp("ステレオ保持"), jp("元の横幅"),
+               jp("動くDNAは中央成分のまま保ち、元音の左右差だけを安定した横幅として戻します。")
+               + jp("0%でDNA成分のみ、100%で元のSide成分を完全に保持。逆位相の素材も消えにくくなります。"));
 
     syncButton.setButtonText (jp("テンポ同期"));
     syncButton.setTooltip (jp("ホストのテンポに合わせて回転速度を決めます。テンポが取得できない場合は「速さ」の値に戻ります。"));
