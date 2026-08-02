@@ -11,71 +11,58 @@ ordinary stereo without requiring a binaural or Atmos renderer.
 - Product: DNA Orbit
 - Manufacturer: Flower Pot Studio
 
-> This commercial-upgrade branch is a draft. Its newest changes must be built,
-> tested and listened to locally before merge.
+> This commercial-upgrade branch is still a draft. Its newest changes must be
+> compiled, tested and auditioned locally before merge.
 
-## Signal concept
+## Product signal model
 
 ```text
-M = 0.5 * (L + R)
-S = 0.5 * (L - R)
-
-moving strand A = processed M
-moving strand B = processed M
-Core             = centred M
-Side bed          = StereoPreserve * S
+Input L/R
+  ├─ Dry path
+  └─ 4th-order Linkwitz–Riley Bass Anchor
+       ├─ Low Mid ───────────────────────────────┐
+       └─ High band M/S                         │
+            ├─ Mid → Strand A orbit ──┐          │
+            ├─ Mid → Strand B orbit ──┼─ Auto Gain
+            ├─ Mid → Core ────────────┘          │
+            └─ Side × Stereo Preserve ───────────┤
+                                                 ├─ optional NULL CORE
+                                                 ├─ correlation-aware Dry/Wet
+                                                 ├─ Output
+                                                 └─ optional Soft Bypass → Output
 ```
 
-At full Symmetry, strand B stays `pi` radians opposite strand A. The two
-moving strands therefore share both an antipodal geometry and the same
-programme content. Stereo width is retained separately as a balanced Side
-layer instead of feeding unrelated L/R energy into the two moving strands.
+At full Symmetry, strand B stays `pi` radians opposite strand A. Both moving
+strands carry the same Mid programme content, so the orbit's centre is not
+biased by unrelated left/right energy. Stereo width is restored separately as
+a balanced high-band Side layer.
 
-This distinction matters: a geometric midpoint of zero alone does not ensure
-a perceptually centred orbit when the two moving objects contain different
-energy. The Mid-orbit + Side-bed design keeps the moving DNA centred while
-preserving the source's stereo atmosphere.
-
-## HELIX and NULL CORE
-
-HELIX is the normal musical mode. Both strands retain normal polarity and the
-Wet signal is designed to remain useful in mono.
-
-NULL CORE removes the Mid component of the **complete Wet output**, including
-the preserved Side bed. It is intentionally Side-only and can nearly disappear
-when summed to mono. The UI displays a persistent warning and the transition is
-smoothed over approximately 120 ms.
-
-## Interface
+## Main controls
 
 ### Basic
 
-- 速さ — revolution time
+- 速さ — free-running revolution time
 - 広がり — left/right orbit width
 - 立体感 — front/back cue strength
-- 効果量 — Dry/Wet amount
+- 効果量 — correlation-aware Dry/Wet amount
 - action-named factory presets
 
 ### Detail
 
-- Tempo Sync and Division
-- Symmetry
-- Twist
-- Core
-- Output
-- Stereo Preserve
-- Auto Gain
+- Tempo Sync and musical Division
+- Phase Mode: Free / Retrigger / Host Lock
+- Start Phase and Direction
+- Symmetry and Twist
+- Core and Stereo Preserve
+- Bass Anchor
+- Character: Natural / Vivid / Deep
+- Output and Auto Gain
 - Soft Bypass
 - NULL CORE
 
-The 3D double helix is generated from the real orbit history used by the DSP.
-It displays the strand paths, ideal centre reference, centroid drift, output
-RMS and L/R correlation. Rendering quality adapts to measured frame cost and
-animation stops when the editor is not visible.
-
 ## Parameters
 
-| Parameter | ID | Range | Default |
+| Parameter | ID | Range | Fresh default |
 |---|---|---:|---:|
 | Rate | `rate` | 0.02–4 Hz | 0.12 Hz |
 | Sync | `sync` | Off/On | Off |
@@ -91,18 +78,88 @@ animation stops when the editor is not visible.
 | Auto Gain | `autoGain` | Off/On | On |
 | Stereo Preserve | `stereoPreserve` | 0–100% | 70%* |
 | Soft Bypass | `softBypass` | Off/On | Off |
+| Bass Anchor | `bassAnchorHz` | Off / 20–500 Hz | 120 Hz* |
+| Character | `character` | Natural/Vivid/Deep | Natural |
+| Phase Mode | `phaseMode` | Free/Retrigger/Host Lock | Host Lock* |
+| Start Phase | `startPhase` | 0–360° | 0° |
+| Direction | `direction` | CW/CCW | CW |
 
-\* Legacy projects saved before Stereo Preserve existed load at 0%. The 70%
-fresh-instance value is a listening candidate and must be confirmed before
-release.
+\* Compatibility migration:
+
+- schema-1 projects load Stereo Preserve at 0%;
+- schema-1/2 projects load Bass Anchor at 20 Hz, which is a bit-transparent
+  bypass rather than a 20 Hz filter;
+- schema-1/2 projects load Phase Mode as Free, reproducing the previous
+  speed-synchronised but non-position-locked behaviour.
+
+## Bass Anchor
+
+Bass Anchor uses a fourth-order Linkwitz–Riley crossover. Below the selected
+frequency, L/R are converted to a stable mono Low Mid and reintroduced after
+the moving high-band orbit. Above it, the Mid DNA and preserved Side bed work
+normally.
+
+Goals:
+
+- keep kick, bass and full mixes spatially stable;
+- prevent sub/low-frequency Side energy from orbiting unpredictably;
+- retain the source's upper-frequency stereo atmosphere;
+- recombine low/high crossover paths with flat magnitude.
+
+`20 Hz / Off` is a literal bypass: `low = 0`, `high = input`. This is required
+for old-project signal-path compatibility.
+
+## Character
+
+Character controls the front/back perceptual model rather than adding generic
+saturation or oversampling.
+
+- **Natural** — original 4 dB attenuation, 5 kHz rear cutoff, 8 ms rear delay
+- **Vivid** — stronger 6 dB movement, brighter 8 kHz rear cutoff, 10 ms delay
+- **Deep** — 8 dB attenuation, darker 3.5 kHz rear cutoff, 14 ms delay
+
+The values are current engineering defaults, not final artistic tuning. Final
+preset values require real vocal, guitar, synth, drum and full-mix auditioning.
+
+## Tempo and phase
+
+Tempo Sync now separates **speed** from **phase behaviour**.
+
+### Free
+
+The orbit runs continuously. Host BPM changes the rate when Sync is enabled,
+but the current position is not forced to the song timeline.
+
+### Retrigger
+
+The orbit returns to Start Phase whenever transport changes from stopped to
+playing, then runs continuously.
+
+### Host Lock
+
+The orbit is calculated from host PPQ song position:
+
+```text
+phase = startPhase + direction * 2*pi * (PPQ / beatsPerCycle)
+```
+
+`beatsPerCycle` honours the host time signature for bar divisions. A one-bar
+cycle is therefore 4 quarter notes in 4/4, 3 in 3/4 and 3 in 6/8. Half-,
+quarter- and eighth-note divisions remain absolute musical note values.
+
+The same PPQ position, cycle, direction and Start Phase produce the same orbit
+position, supporting repeatable playback and offline rendering. Loop or song
+position jumps use a bounded 30 ms correction instead of a hard audio jump.
+When BPM or PPQ is unavailable, Host Lock falls back safely to Free.
 
 ## Stereo Preserve
 
-`Stereo Preserve = 0%` is the legacy Mid-only Wet path.
-
-Above 0%, the original Side component is restored after geometry Auto Gain:
+Stereo Preserve restores the high-band Side component after the geometry-based
+Mid-orbit Auto Gain:
 
 ```text
+M = 0.5 * (L + R)
+S = 0.5 * (L - R)
 sideBed = p * S
 wetL += sideBed
 wetR -= sideBed
@@ -110,64 +167,67 @@ wetR -= sideBed
 
 Consequences:
 
-- mono input is unchanged at every value;
+- the moving DNA always carries common Mid content;
 - pure Side material has equal L/R energy and zero Mid;
 - anti-phase material remains audible above 0%;
-- original width is not multiplied by the Mid-orbit make-up gain;
-- the moving DNA remains content-centred;
+- Side width is not multiplied by a same-source geometry estimate;
 - NULL CORE remains literally Side-only.
-
-See `ADR-004-centered-stereo-preserve.md` and the Stereo Preserve/Center tests.
 
 ## Auto Gain and correlation-aware Mix
 
 Auto Gain has two bounded stages.
 
-### 1. Geometry Wet compensation
-
-A deterministic estimate compensates the moving Mid strands and Core using
-pan gains, front/back attenuation, delay coherence and geometry. It is not an
-RMS follower and does not chase individual transients. The stationary Side bed
-is added after this stage.
-
-### 2. Dry/Wet correlation normalization
-
-Equal-power mixing can create a +3.01 dB bump at 50% when Dry and Wet are
-identical. DNA Orbit estimates stereo Dry/Wet correlation once per block,
-smooths it over 250 ms, and predicts the main-mix power:
+1. A deterministic geometry estimate compensates the moving Mid strands and
+   Core using pan, attenuation and delay coherence.
+2. Dry/Wet correlation is measured per block, smoothed over 250 ms and used to
+   remove the persistent +3.01 dB 50%-Mix bump that equal-power mixing produces
+   when Dry and Wet are similar.
 
 ```text
-P = gD^2 + gW^2 + 2*rho*gD*gW
+P = gD² + gW² + 2*rho*gD*gW
 normalizer = 1 / sqrt(P)
 ```
 
-The predicted power is clamped so correction cannot exceed approximately
-±3.01 dB. Mix 0% and 100% are unchanged. Auto Gain OFF disables both the
-geometry makeup and correlation normalization, exposing the raw path.
+Correction is limited to approximately ±3.01 dB. Mix 0% and 100% remain
+unchanged. Auto Gain Off exposes the raw geometry and mix law.
 
-See `ADR-006-correlation-aware-mix.md` and `CorrelationMixTests.cpp`.
+## Bypass modes
 
-## Soft Bypass
+### Soft Bypass
 
-Soft Bypass is the plug-in-owned musical A/B control.
+The plug-in-owned A/B control crossfades linearly to exact Dry over 60 ms while
+keeping delays, filters and orbit position running. Fully bypassed output
+ignores Output trim.
 
-- the engine, delays, filters and orbit continue running;
-- processed output crossfades linearly to exact input Dry over 60 ms;
-- fully bypassed audio ignores Output trim;
-- returning resumes the current orbit instead of a stale position.
+### Host bypass
 
-Linear interpolation is intentional because an equal-power bypass law can
-create another gain bump when Dry and processed audio are correlated.
+Host bypass returns immediate exact Dry while the engine advances on a
+preallocated scratch buffer. This avoids stale phase and delay state after
+un-bypass without allocating on the audio thread.
 
-Host bypass is separate: it returns immediate exact Dry while advancing the
-engine on a preallocated scratch copy.
+## NULL CORE
+
+NULL CORE removes the Mid component of the complete Wet output. It is an
+experimental, intentionally mono-unsafe Side-only mode. The transition is
+smoothed over approximately 120 ms, the UI shows a warning, and Core is visibly
+disabled while the mode is active.
+
+## Performance work in this branch
+
+- symmetric mode reuses `sin(theta + pi) = -sin(theta)` and
+  `cos(theta + pi) = -cos(theta)` for Strand B;
+- Bass Anchor coefficient rebuilds occur only when the cutoff changes;
+- no new audio-thread allocations, locks, file I/O or UI calls were added;
+- the exact legacy Bass Anchor-off path is maintained;
+- more aggressive control-rate interpolation was deliberately postponed until
+  it can be measured against a larger audio regression corpus.
 
 ## Factory presets
 
 Factory presets are defined independently of the GUI in `Source/Presets.h`.
-Every preset sets the complete audio state, including Sync, Division, Output,
-Auto Gain, Stereo Preserve and Soft Bypass. Applying a preset therefore never
-inherits hidden values from the previous state.
+Every preset sets the complete parameter state, including Bass Anchor,
+Character, phase mode, Start Phase and Direction, so presets never inherit
+hidden values from prior automation.
 
 Current presets:
 
@@ -177,37 +237,21 @@ Current presets:
 - シンセを速く回す
 - 実験:中心を消す
 
-The Basic page shows 元に戻す after the selected preset is modified.
+## Visualiser
 
-## Simplified signal flow
-
-```text
-Input L/R
-  +-- Dry ----------------------------------------------------------+
-  +-- M/S split                                                    |
-       +-- M -> Strand A -> depth/filter/delay/pan --+             |
-       +-- M -> Strand B -> depth/filter/delay/pan --+             |
-       +-- M -> Core --------------------------------+             |
-                                      geometry Auto Gain           |
-       +-- S * Stereo Preserve -----------------------+             |
-                                      optional NULL CORE           |
-                                      Dry/Wet Mix                   |
-                                      correlation normalization    |
-                                      Output trim                  |
-                                      optional Soft Bypass --------+
-                                                                  Output
-```
+The 3D double helix is generated from the real orbit history used by the DSP.
+It displays strand paths, the ideal centre reference, centroid drift, output
+RMS, L/R correlation, Bass Anchor state and Host Lock status. Rendering quality
+adapts to measured frame cost and animation stops while the editor is hidden.
 
 ## Build
-
-Requirements: CMake 3.22+, a C++20 compiler, Xcode command-line tools on
-macOS, or Visual Studio 2022 Desktop C++ on Windows.
 
 ### macOS / Linux
 
 ```sh
 git clone <repository-url> DNA-Orbit
 cd DNA-Orbit
+git checkout agent/world-class-dsp-phase3
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release -j
 ctest --test-dir build --output-on-failure
@@ -218,35 +262,38 @@ ctest --test-dir build --output-on-failure
 ```powershell
 git clone <repository-url> DNA-Orbit
 cd DNA-Orbit
+git checkout agent/world-class-dsp-phase3
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-JUCE is pinned to 8.0.15 and fetched through CMake `FetchContent`. Build
-artifacts are placed under `build/DNAOrbit_artefacts/Release/`.
+JUCE is pinned to 8.0.15 and fetched through CMake `FetchContent`.
 
 ## Test coverage
 
-The CTest executable contains tests for:
+The CTest executable now includes coverage for:
 
-- orbit math and antipodal centroid invariants;
-- finite output across sample rates, block sizes and parameter extremes;
-- parameter smoothing and abrupt automation;
-- NULL CORE mono behaviour;
-- malformed state, round-trip and schema migration;
-- exact host-bypass passthrough and state continuity;
-- deterministic factory presets;
-- legacy Stereo Preserve behaviour;
-- pure-Side balance, zero Mid and Auto Gain independence;
-- Soft Bypass exact-Dry endpoint, transition and phase continuity;
-- correlation-aware 50% Mix level matching and endpoint invariance;
-- visual history, projection and resize bounds.
+- orbit geometry and finite-output stress cases;
+- state migration and complete parameter round-trip;
+- exact host-bypass and Soft Bypass behaviour;
+- Stereo Preserve and centred Side-bed invariants;
+- correlation-aware mix endpoints and 50% level behaviour;
+- Linkwitz–Riley crossover recombination;
+- Bass Anchor low-frequency Side removal and high-frequency preservation;
+- distinct finite Character responses;
+- 3/4, 4/4 and 6/8 musical bar lengths;
+- deterministic Host Lock at identical PPQ positions;
+- Start Phase and direction mapping;
+- complete factory-preset determinism.
 
-### Mandatory validation for this draft
+## Validation status
 
-The current ChatGPT environment edited GitHub but could not compile this
-branch. Before changing the PR from draft:
+The code and tests are present in the draft PR, but this ChatGPT environment
+could not download and compile the complete GitHub branch. None of the new
+build/test claims are marked passed yet.
+
+Before changing the PR from draft:
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -254,31 +301,24 @@ cmake --build build --config Release -j
 ctest --test-dir build --output-on-failure
 ```
 
-Then run the sanitizer configuration in `CMakeLists.txt`, render the headless
-screenshots, and run pluginval, VST3 Validator and `auval` where available.
+Then run the sanitizer configuration in `CMakeLists.txt`, headless screenshot
+rendering, pluginval, VST3 Validator and `auval` where available.
 
-## Remaining work before commercial release
+## Remaining commercial work
 
-- Bass Anchor crossover
-- PPQ-position Host Phase Lock and non-4/4 bar handling
-- control-rate/CPU optimisation of per-sample coefficient calculations
-- Character modes and final factory-preset tuning
-- English localisation and accessibility pass
-- macOS/Windows signing, notarisation and installers
-- real DAW and real-programme listening verification
+- compile-error and regression fixes discovered by the first local build;
+- measured CPU profiling at 44.1/48/96/192 kHz and multiple block sizes;
+- final Character and factory-preset listening/tuning;
+- visual timeline reset verification on host loop/jump;
+- English localisation and full accessibility pass;
+- macOS/Windows signing, notarisation and installers;
+- real-DAW scan, automation, project restore and offline-bounce verification.
 
-The front/back model is a musical perceptual approximation, not HRTF or
-physical binaural rendering.
+The front/back model is a musical perceptual approximation, not HRTF or a
+physical binaural renderer.
 
-## Licensing
+## Licensing and manual release checks
 
-See `LICENSE_NOTES.md`. Confirm the JUCE licence, DNA Orbit source licence,
-code signing, notarisation and installer requirements before distribution.
-
-## Manual release checks
-
-See `MANUAL_REQUIRED.md` and the documents under
-`docs/commercial-upgrade/`. At minimum, verify Stereo Preserve at
-0/25/50/70/100%, automate Soft Bypass, sweep Mix with Auto Gain on/off, test
-mono fold-down, save/reopen projects, render offline, and measure multiple
-instances with the editor open and closed.
+See `LICENSE_NOTES.md`, `MANUAL_REQUIRED.md` and the documents under
+`docs/commercial-upgrade/`. Confirm the JUCE licence, signing, notarisation,
+installer and clean-machine requirements before distribution.
