@@ -13,6 +13,7 @@ add_executable(DNAOrbitTests
     PresetsTests.cpp
     StereoPreserveTests.cpp
     StereoCenterTests.cpp
+    SoftBypassTests.cpp
 )
 
 target_include_directories(DNAOrbitTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
