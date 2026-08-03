@@ -225,20 +225,40 @@ silencing Wet, Mix-sweep RMS deviation bounds) for actually listening.
   from this kind of utility) needs a real listening session.
 
 - **Undo/Redo end-to-end in a real host** (see
-  `docs/commercial-upgrade/decisions/ADR-009-ui-ux-batch.md`): the
-  Undo/Redo mechanism itself (a single parameter change, a multi-parameter
-  transaction, `Presets::apply`'s one-transaction-per-preset behaviour) is
-  verified in `Tests/UndoRedoTests.cpp` by driving APVTS's ValueTree
-  directly, because this headless container's test runner has no message
-  loop to pump (`JUCE_MODAL_LOOPS_PERMITTED` is off for plugin targets, so
+  `docs/commercial-upgrade/decisions/ADR-009-ui-ux-batch.md` and
+  `ADR-012-editor-keyboard-focus.md`): the Undo/Redo mechanism itself (a
+  single parameter change, a multi-parameter transaction, `Presets::apply`'s
+  one-transaction-per-preset behaviour) is verified in
+  `Tests/UndoRedoTests.cpp` by driving APVTS's ValueTree directly, because
+  this headless container's test runner has no message loop to pump
+  (`JUCE_MODAL_LOOPS_PERMITTED` is off for plugin targets, so
   `MessageManager::runDispatchLoopUntil()` isn't available) and
   AudioProcessorValueTreeState only mirrors parameter changes into that
   ValueTree - the thing Undo/Redo actually records - via its own internal
   ~10Hz timer. In other words: the *mechanism* is tested, but the full path
   from "drag a knob in a real DAW" through to "Ctrl+Z undoes it" has not
-  been exercised end-to-end. Also unverified: whether the host's own
-  Ctrl+Z (if any) conflicts or interacts oddly with the plugin window's
-  Ctrl+Z when the plugin editor has keyboard focus, across different hosts.
+  been exercised end-to-end.
+
+  ADR-012 fixed a real bug found by comparing this branch's
+  `CMakeLists.txt` against a parallel one: `EDITOR_WANTS_KEYBOARD_FOCUS`
+  was `FALSE`, which (per JUCE's `detail/juce_VSTWindowUtilities.h`) adds
+  the editor to the desktop with `ComponentPeer::windowIgnoresKeyPresses`
+  in VST3/AU - the window then never receives a key event at all, so
+  `keyPressed()` was silently dead in every plugin format and Ctrl+Z only
+  ever worked in the Standalone build. That is now `TRUE`, confirmed via
+  `compile_commands.json` to actually flip
+  `JucePlugin_EditorRequiresKeyboardFocus` to 1, and both `DNAOrbit_VST3`
+  and `DNAOrbit_Standalone` still build clean. What still needs a real
+  host:
+  1. That Ctrl+Z/Ctrl+Shift+Z now actually fire inside a real VST3/AU host,
+     not just in Standalone.
+  2. Whether `EDITOR_WANTS_KEYBOARD_FOCUS TRUE` costs anything - i.e.
+     whether a host's own shortcuts (spacebar transport is the classic
+     casualty) stop reaching the host while the plugin editor has focus.
+     `keyPressed()` returns `false` for every key except the two Undo/Redo
+     chords specifically so unhandled keys can be forwarded, but whether a
+     given host's JUCE wrapper interaction actually does that forwarding
+     needs checking per DAW.
 
 ## Signing, notarization, installers
 

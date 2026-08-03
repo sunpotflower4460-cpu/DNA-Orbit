@@ -321,6 +321,13 @@ driving APVTS's underlying `ValueTree` directly rather than through a
 message loop (`JUCE_MODAL_LOOPS_PERMITTED` is off for plugin targets, so
 `Tests/UndoRedoTests.cpp` can't pump one the way a real host does).
 
+The plugin build sets `EDITOR_WANTS_KEYBOARD_FOCUS TRUE` in `CMakeLists.txt`
+specifically so these shortcuts work in VST3/AU, not just Standalone — see
+`docs/commercial-upgrade/decisions/ADR-012-editor-keyboard-focus.md` for why
+that flag matters (without it, JUCE adds the editor window with
+`ComponentPeer::windowIgnoresKeyPresses` on macOS, so `keyPressed()` is
+never called at all, regardless of `setWantsKeyboardFocus()`).
+
 ### Presets
 
 Selectable from the プリセット menu in the 基本 tab. Defined in

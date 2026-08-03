@@ -76,7 +76,23 @@ juce_add_plugin(DNAOrbit
     NEEDS_MIDI_INPUT            FALSE
     NEEDS_MIDI_OUTPUT           FALSE
     IS_MIDI_EFFECT              FALSE
-    EDITOR_WANTS_KEYBOARD_FOCUS FALSE
+    # Must be TRUE for the editor's Ctrl+Z / Ctrl+Shift+Z Undo/Redo to work
+    # in a plugin host at all. This maps to JucePlugin_EditorRequiresKeyboardFocus,
+    # and when it is FALSE the wrapper adds the editor to the desktop with
+    # ComponentPeer::windowIgnoresKeyPresses (see JUCE's
+    # detail/juce_VSTWindowUtilities.h) - the window then never receives a
+    # key event, so PluginEditor::keyPressed() is never called no matter what
+    # setWantsKeyboardFocus() says on the component. It was FALSE when
+    # Undo/Redo shipped, which meant the shortcuts only ever worked in the
+    # Standalone build; see ADR-012.
+    #
+    # Cost of TRUE: while the plugin window has focus, keys it does not
+    # consume may not reach the host's own shortcuts (spacebar transport is
+    # the usual casualty). keyPressed() returns false for everything except
+    # the Undo/Redo chords specifically so that hosts which do forward
+    # unhandled keys still can - but whether a given host actually does needs
+    # real-DAW checking (MANUAL_REQUIRED.md).
+    EDITOR_WANTS_KEYBOARD_FOCUS TRUE
     COPY_PLUGIN_AFTER_BUILD     FALSE
 )
 
