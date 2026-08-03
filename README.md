@@ -462,12 +462,25 @@ cmake --build build --config Release -j
 ctest --test-dir build --output-on-failure
 ```
 
-For a fuller local pass — Release + CTest, ASan+UBSan + CTest, this
-project's own sources rebuilt with `-Werror`, and `clang-tidy` (see
-`.clang-tidy`) — run:
+For a fuller local pass — a static real-time-safety audit, Release + CTest,
+ASan+UBSan + CTest, this project's own sources rebuilt with `-Werror`, and
+`clang-tidy` (see `.clang-tidy`) — run:
 
 ```sh
 ./Tools/local_validate.sh
+```
+
+The real-time audit (`scripts/static-realtime-audit.sh`, also runnable on
+its own) scans the DSP for constructs that must never reach the audio
+thread — heap allocation, locking, filesystem/logging, message-thread
+calls. It strips comments before scanning, since this project comments
+heavily and phrases like "lock-free" would otherwise be reported as
+allocations. It is a regression tripwire, not proof: it does not follow the
+call graph, so a clean scan means "no obvious new hazard" and nothing
+stronger.
+
+```sh
+./scripts/static-realtime-audit.sh
 ```
 
 This is the local equivalent of the CI matrix's Linux lane; see
@@ -643,6 +656,24 @@ cmake --build build --config Release -j --target DNAOrbitRenderShots
 
 It writes a locked shot, a detail-tab shot, two drift shots and a NULL CORE
 shot. Off by default (`DNA_ORBIT_BUILD_TOOLS=OFF`).
+
+### Other developer tools
+
+All behind the same `-DDNA_ORBIT_BUILD_TOOLS=ON` flag, none shipped:
+
+- **`DNAOrbitRenderAudioSample`** — renders dry/wet WAV pairs of a
+  synthesized pad and a sustained vocal-ish tone through real factory
+  presets, so the effect can be listened to rather than only reasoned about.
+- **`DNAOrbitPresetIntensityAnalysis`** — measures how audible a parameter
+  set actually is (stereo width, pan movement, level vs. dry in stereo and
+  mono), with per-parameter sweeps. This is what ADR-010's preset re-tuning
+  was based on.
+- **`DNAOrbitStereoPreserveAnalysis`** — the Stereo Preserve measurements
+  cited in ADR-004.
+- **`DNAOrbitBenchmarkDSP`** — deterministic throughput benchmark across
+  sample rates, block sizes and instance counts. Absolute numbers from a
+  shared/virtualised machine are meaningless (see ADR-005); the value is
+  before/after comparison in one session on one machine.
 
 ## 14. Manual checks to run in a real DAW before shipping
 

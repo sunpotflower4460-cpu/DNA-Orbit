@@ -263,10 +263,20 @@ a local equivalent of the CI matrix's Linux lane:
 
 This runs, in order (see the script for details, and MANUAL_REQUIRED.md's
 "clang-tidy / warnings-as-errors" section above for what it checks):
-1. Release build + full CTest suite
-2. ASan+UBSan Debug build + full CTest suite (GCC/Clang only)
-3. This project's own sources rebuilt with `-Werror`
-4. `clang-tidy` against this project's own `.cpp` files
+1. Static real-time-safety audit (`scripts/static-realtime-audit.sh`)
+2. Release build + full CTest suite
+3. ASan+UBSan Debug build + full CTest suite (GCC/Clang only)
+4. This project's own sources rebuilt with `-Werror`
+5. `clang-tidy` against this project's own `.cpp` files
+
+Note on step 1 (see `docs/commercial-upgrade/decisions/ADR-011-parallel-branch-triage.md`):
+the real-time audit is a **static token scan**, not proof of real-time
+safety. It does not follow the call graph, so it cannot tell whether a
+flagged construct is reachable from a callback, nor see a hazard behind a
+function it does not scan. It was verified to catch deliberately-injected
+allocation/locking/logging hazards (and then reverted), so it is known to
+work rather than merely known to be quiet — but the actual guarantees still
+come from design discipline, the sanitizer runs, and the tests.
 
 Every build directory it creates (`build-validate-*`) is removed afterward
 regardless of outcome, matching the existing throwaway-ASan-build

@@ -8,10 +8,12 @@
 #   ./Tools/local_validate.sh
 #
 # Steps, each of which must pass for the script to exit 0:
-#   1. Release build + full CTest suite
-#   2. ASan+UBSan Debug build + full CTest suite (GCC/Clang only)
-#   3. This project's own sources (not JUCE's) rebuilt with -Werror
-#   4. clang-tidy against this project's own .cpp files (see .clang-tidy;
+#   1. Static real-time-safety audit (scripts/static-realtime-audit.sh) -
+#      instant, so it runs first and fails fast on an audio-thread hazard
+#   2. Release build + full CTest suite
+#   3. ASan+UBSan Debug build + full CTest suite (GCC/Clang only)
+#   4. This project's own sources (not JUCE's) rebuilt with -Werror
+#   5. clang-tidy against this project's own .cpp files (see .clang-tidy;
 #      skipped with a warning if clang-tidy is not installed)
 #
 # Every build directory this script creates is removed afterward (success
@@ -41,7 +43,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# --- 1. Release build + CTest ------------------------------------------------
+# --- 1. Static real-time-safety audit ----------------------------------------
+# Costs nothing and catches an entire class of regression (an allocation or
+# lock creeping onto the audio path) that a passing test suite would not,
+# so it goes first.
+step "Static real-time-safety audit"
+if bash scripts/static-realtime-audit.sh >/tmp/local_validate_rt_audit.log 2>&1; then
+    echo "OK - see /tmp/local_validate_rt_audit.log for the warning groups"
+else
+    fail "static real-time audit (log: /tmp/local_validate_rt_audit.log)"
+fi
+
+# --- 2. Release build + CTest ------------------------------------------------
 step "Release build + full CTest suite"
 if cmake -S . -B build-validate-release -DCMAKE_BUILD_TYPE=Release >/tmp/local_validate_release_configure.log 2>&1 \
     && cmake --build build-validate-release -j >/tmp/local_validate_release_build.log 2>&1 \
@@ -52,7 +65,7 @@ else
     fail "Release build/CTest (logs: /tmp/local_validate_release_{configure,build,ctest}.log)"
 fi
 
-# --- 2. ASan+UBSan ------------------------------------------------------------
+# --- 3. ASan+UBSan ------------------------------------------------------------
 step "ASan+UBSan Debug build + full CTest suite"
 if cmake -S . -B build-validate-asan -DCMAKE_BUILD_TYPE=Debug -DDNA_ORBIT_SANITIZERS="address,undefined" >/tmp/local_validate_asan_configure.log 2>&1 \
     && cmake --build build-validate-asan -j >/tmp/local_validate_asan_build.log 2>&1 \
@@ -63,7 +76,7 @@ else
     fail "ASan+UBSan build/CTest (logs: /tmp/local_validate_asan_{configure,build,ctest}.log)"
 fi
 
-# --- 3. Warnings-as-errors (this project's own sources only) -----------------
+# --- 4. Warnings-as-errors (this project's own sources only) -----------------
 step "This project's own sources, rebuilt with -Werror"
 if cmake -S . -B build-validate-werror -DCMAKE_BUILD_TYPE=Release -DDNA_ORBIT_WARNINGS_AS_ERRORS=ON >/tmp/local_validate_werror_configure.log 2>&1 \
     && cmake --build build-validate-werror --target DNAOrbit DNAOrbitTests -j >/tmp/local_validate_werror_build.log 2>&1
@@ -73,13 +86,13 @@ else
     fail "-Werror build (logs: /tmp/local_validate_werror_{configure,build}.log)"
 fi
 
-# --- 4. clang-tidy -------------------------------------------------------------
+# --- 5. clang-tidy -------------------------------------------------------------
 step "clang-tidy (this project's own .cpp files; see .clang-tidy)"
 if ! command -v clang-tidy >/dev/null 2>&1; then
     echo "SKIPPED - clang-tidy is not installed"
 else
     # Reuses the Release build's compile_commands.json (CMAKE_EXPORT_COMPILE_COMMANDS
-    # is on project-wide), so this must run after step 1.
+    # is on project-wide), so this must run after step 2.
     SOURCES="Source/PluginProcessor.cpp Source/PluginEditor.cpp Source/dsp/HelixEngine.cpp Source/ui/HelixView3D.cpp Source/ui/DnaLookAndFeel.cpp"
     if clang-tidy -p build-validate-release $SOURCES >/tmp/local_validate_clang_tidy.log 2>&1; then
         if grep -qE "warning:|error:" /tmp/local_validate_clang_tidy.log; then

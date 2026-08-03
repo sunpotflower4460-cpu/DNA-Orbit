@@ -163,6 +163,17 @@ if (DNA_ORBIT_BUILD_TOOLS)
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
 
+    # Developer tool: deterministic DSP throughput benchmark. Absolute
+    # numbers from this container are not trustworthy (see ADR-005); the
+    # value is before/after comparison on one machine in one session.
+    add_executable(DNAOrbitBenchmarkDSP Tools/BenchmarkDSP.cpp)
+    target_include_directories(DNAOrbitBenchmarkDSP PRIVATE Source)
+    target_link_libraries(DNAOrbitBenchmarkDSP PRIVATE
+        DNAOrbit
+        juce::juce_audio_processors
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+
     # Developer tool: measures how audible a parameter set actually is
     # (pan swing, width, level, mono fold-down), so preset intensity can be
     # tuned from measurements rather than guesswork.
