@@ -163,6 +163,17 @@ if (DNA_ORBIT_BUILD_TOOLS)
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
 
+    # Developer tool: measures how audible a parameter set actually is
+    # (pan swing, width, level, mono fold-down), so preset intensity can be
+    # tuned from measurements rather than guesswork.
+    add_executable(DNAOrbitPresetIntensityAnalysis Tools/PresetIntensityAnalysis.cpp)
+    target_include_directories(DNAOrbitPresetIntensityAnalysis PRIVATE Source)
+    target_link_libraries(DNAOrbitPresetIntensityAnalysis PRIVATE
+        DNAOrbit
+        juce::juce_audio_processors
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+
     # Developer/demo tool: renders short WAV files (dry + processed through a
     # real factory preset) of a synthesized pad and a synthesized "vocal-ish"
     # tone, so the effect can actually be listened to. Not part of the

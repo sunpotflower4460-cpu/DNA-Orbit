@@ -69,6 +69,35 @@ real vocal/pad/guitar material. Nothing here substitutes automated DSP tests
 (which do run, and do check the numeric claims — e.g. anti-phase no longer
 silencing Wet, Mix-sweep RMS deviation bounds) for actually listening.
 
+- **Factory preset intensity, re-tuned from a user listening report** (see
+  `docs/commercial-upgrade/decisions/ADR-010-preset-intensity.md`): the
+  original shipped presets measured as very nearly mono (width, i.e.
+  1 - L/R correlation, as low as 0.045 for "ボーカルを広げる") on a
+  synthesized pad, and a real listener confirmed this by ear before any
+  measurement was taken. All 5 presets were re-tuned (mostly via Mix, with
+  smaller Radius/Depth/Twist/Core moves) and now measure 0.234-0.648 on the
+  same synthesized source - `Tests/PresetIntensityTests.cpp` pins a
+  minimum-width floor so this can't silently regress. What is NOT yet
+  confirmed by ear:
+  1. Whether the new values are now *too* strong, or still not enough, on
+     real vocal/pad/guitar/drum material rather than a synthesized pad -
+     the width metric is a reasonable proxy but not a substitute for
+     listening across real source material types (see
+     `08_手動試聴_DAW検証仕様書.md`'s input list).
+  2. Whether the ~0.7-0.8dB level dip most presets now show relative to Dry
+     (from the higher Mix, only partly offset by Auto Gain) is audible as
+     a loudness drop when switching a preset on/off, versus masked by Auto
+     Gain as intended.
+  3. "実験:中心を消す" (NULL CORE) specifically dips ~2.9dB in stereo at
+     its new Mix - deliberately left uncompensated (see the ADR for why a
+     flat output trim was tried and rejected: it would also undo the
+     mono-cancellation this preset exists to demonstrate). Whether that
+     stereo dip reads as "the experimental mode has a real cost" (intended)
+     or "sounds broken" (not intended) needs a real ear.
+  `Tools/PresetIntensityAnalysis.cpp` (build with `-DDNA_ORBIT_BUILD_TOOLS=ON`)
+  reproduces the measurements cited in ADR-010 on demand, including sweeps
+  of each parameter individually for further tuning.
+
 - **Stereo Preserve default (70%) and high-value character** (see
   `docs/commercial-upgrade/decisions/ADR-004-stereo-preserve-bed.md`, which
   supersedes ADR-003's now-abandoned design): Phase 2.5 re-verified Stereo

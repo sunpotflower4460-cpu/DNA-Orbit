@@ -19,6 +19,7 @@ add_executable(DNAOrbitTests
     SoftBypassTests.cpp
     MonoPreviewTests.cpp
     UndoRedoTests.cpp
+    PresetIntensityTests.cpp
 )
 
 target_include_directories(DNAOrbitTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
@@ -34,6 +35,7 @@ if (DNA_ORBIT_WARNINGS_AS_ERRORS AND NOT MSVC)
         PresetsTests.cpp StereoPreserveTests.cpp CrossoverFilterTests.cpp
         BassAnchorTests.cpp CharacterTests.cpp HostPhaseLockTests.cpp
         SoftBypassTests.cpp MonoPreviewTests.cpp UndoRedoTests.cpp
+        PresetIntensityTests.cpp
         PROPERTIES COMPILE_OPTIONS "-Werror")
 endif()
 

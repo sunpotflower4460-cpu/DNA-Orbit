@@ -337,13 +337,17 @@ are then saved with the project like any other setting.
 Once you nudge anything after picking a preset, a 元に戻す (Revert) button
 appears next to the menu to snap back to the preset's exact values.
 
+Intensity was re-tuned from measurements (`Tools/PresetIntensityAnalysis.cpp`)
+after the original values proved too subtle to hear — see
+`docs/commercial-upgrade/decisions/ADR-010-preset-intensity.md`.
+
 | Preset | Rate | Radius | Depth | Symmetry | Twist | Core | Mix | Null Core |
 |---|---|---|---|---|---|---|---|---|
-| ボーカルを広げる | 0.10 Hz | 75% | 45% | 100% | 4 ms | 10% | 30% | off |
-| パッドを回す | 0.18 Hz | 100% | 65% | 100% | 7 ms | 10% | 45% | off |
-| ギターに揺らぎ | 0.08 Hz | 80% | 60% | 88% | 6 ms | 15% | 40% | off |
-| シンセを速く回す | 0.60 Hz | 90% | 70% | 100% | 8 ms | 0% | 40% | off |
-| 実験:中心を消す | 0.04 Hz | 100% | 50% | 100% | 8 ms | 0% | 30% | **on** |
+| ボーカルを広げる | 0.13 Hz | 85% | 65% | 100% | 5 ms | 5% | 62% | off |
+| パッドを回す | 0.18 Hz | 100% | 85% | 100% | 8 ms | 5% | 70% | off |
+| ギターに揺らぎ | 0.11 Hz | 90% | 75% | 88% | 7 ms | 10% | 60% | off |
+| シンセを速く回す | 0.60 Hz | 100% | 85% | 100% | 9 ms | 0% | 65% | off |
+| 実験:中心を消す | 0.06 Hz | 100% | 70% | 100% | 8 ms | 0% | 60% | **on** |
 
 ### Level matching (Auto Gain)
 
@@ -567,6 +571,10 @@ built-in `UnitTest` framework:
   `Presets::apply`'s one-step-per-preset behaviour relies on), and that
   `Presets::apply` opens a transaction named after the preset when given an
   UndoManager.
+- **PresetIntensity** — that every factory preset measures a minimum stereo
+  width (1 - L/R correlation) on a mono-centred test signal, guarding
+  against the presets silently drifting back to the barely-audible values
+  ADR-010 replaced after a listening report.
 
 ## 10. Where the build output lands
 

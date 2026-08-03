@@ -49,12 +49,34 @@ namespace dnaorbit::presets
         bool  monoPreview;
     };
 
+    // Intensity re-tuned from measurements (Tools/PresetIntensityAnalysis.cpp)
+    // after the original values proved too timid to hear: "ボーカルを広げる"
+    // in particular sat at Mix 30% / Core 10%, measuring a width
+    // (1 - L/R correlation) of just 0.045 - very nearly mono. Mix is the
+    // dominant lever (width rises monotonically 0.078 -> 0.485 across the
+    // Mix range) and Core works against it (0.378 at Core 0% down to 0.102
+    // at Core 50%), so both moved. Depth and Twist barely affect width at
+    // all; Rate does not affect any time-averaged metric, but does decide
+    // whether a listener perceives a whole revolution inside a phrase, so
+    // the slowest presets were nudged up. Character stays Natural
+    // throughout: it changes tone rather than intensity, and unlike these
+    // values it has no measured backing yet (see ADR-006 and
+    // MANUAL_REQUIRED.md).
     inline const Preset presets[] = {
-        { "ボーカルを広げる", 0.10f, false, 2,  75.0f, 45.0f, 100.0f, 4.0f, 10.0f, false, 30.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true, false, false },
-        { "パッドを回す",     0.18f, false, 2, 100.0f, 65.0f, 100.0f, 7.0f, 10.0f, false, 45.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true, false, false },
-        { "ギターに揺らぎ",   0.08f, false, 2,  80.0f, 60.0f,  88.0f, 6.0f, 15.0f, false, 40.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true, false, false },
-        { "シンセを速く回す", 0.60f, false, 2,  90.0f, 70.0f, 100.0f, 8.0f,  0.0f, false, 40.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true, false, false },
-        { "実験:中心を消す", 0.04f, false, 2, 100.0f, 50.0f, 100.0f, 8.0f,  0.0f, true,  30.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true, false, false },
+        { "ボーカルを広げる", 0.13f, false, 2,  85.0f, 65.0f, 100.0f, 5.0f,  5.0f, false, 62.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true, false, false },
+        { "パッドを回す",     0.18f, false, 2, 100.0f, 85.0f, 100.0f, 8.0f,  5.0f, false, 70.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true, false, false },
+        { "ギターに揺らぎ",   0.11f, false, 2,  90.0f, 75.0f,  88.0f, 7.0f, 10.0f, false, 60.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true, false, false },
+        { "シンセを速く回す", 0.60f, false, 2, 100.0f, 85.0f, 100.0f, 9.0f,  0.0f, false, 65.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true, false, false },
+        // NULL CORE removes the Wet signal's Mid content entirely, which
+        // Auto Gain's makeup formula does not model (it assumes a normal
+        // strand+core reconstruction) - measured ~2.9dB quiet in stereo at
+        // this Mix, and much quieter still once folded to mono (the entire
+        // point of this preset). A flat output trim was tried to close the
+        // stereo gap, but since it boosts the mono fold-down by the exact
+        // same amount, it directly undoes the mono-cancellation the preset
+        // exists to demonstrate - so the ~2.9dB stereo dip is left as an
+        // honest, measured consequence of removing Mid content, not masked.
+        { "実験:中心を消す", 0.06f, false, 2, 100.0f, 70.0f, 100.0f, 8.0f,  0.0f, true,  60.0f, 0.0f, true, 70.0f, 120.0f, 0, 0, 0.0f, true, false, false },
     };
 
     inline constexpr int numPresets = (int) (sizeof (presets) / sizeof (presets[0]));
