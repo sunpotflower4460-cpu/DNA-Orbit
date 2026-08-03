@@ -8,6 +8,14 @@
 # micro-optimization with no correctness impact. Reordering dozens of
 # members in these heavily-tested, actively-changing types carries more
 # regression risk than the padding is worth.
+#
+# Always run clang-tidy against a compile_commands.json from a PLAIN build
+# (no DNA_ORBIT_WARNINGS_AS_ERRORS), e.g. the one Tools/local_validate.sh
+# uses. GCC's compile flags include GCC-only options like
+# -Wno-maybe-uninitialized that clang silently ignores on their own but
+# turns into a hard "unknown warning option" error once -Werror is also on
+# the command line - clang-tidy would then fail to parse the file at all,
+# for a reason that has nothing to do with this project's own code.
 ---
 Checks: 'clang-diagnostic-*,clang-analyzer-*,bugprone-*,performance-*,modernize-use-nullptr,modernize-use-override,modernize-use-equals-default,readability-else-after-return,readability-redundant-*,-bugprone-easily-swappable-parameters,-bugprone-narrowing-conversions,-performance-avoid-endl,-clang-analyzer-optin.performance.Padding'
 WarningsAsErrors: ''
