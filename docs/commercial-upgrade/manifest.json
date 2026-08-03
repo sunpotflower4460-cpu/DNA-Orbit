@@ -1,0 +1,46 @@
+{
+  "package": "DNA Orbit Commercial Upgrade Package",
+  "repository": "sunpotflower4460-cpu/DNA-Orbit",
+  "files": [
+    {
+      "name": "00_README_使い方.md",
+      "bytes": 2906
+    },
+    {
+      "name": "01_世界基準プロダクト設計.md",
+      "bytes": 5767
+    },
+    {
+      "name": "02_DSP再設計仕様書.md",
+      "bytes": 12989
+    },
+    {
+      "name": "03_UIUX再設計仕様書.md",
+      "bytes": 7265
+    },
+    {
+      "name": "04_QA_商用リリース仕様書.md",
+      "bytes": 6774
+    },
+    {
+      "name": "05_段階別実装ロードマップ.md",
+      "bytes": 5429
+    },
+    {
+      "name": "06_ClaudeCode_マスターキックオフプロンプト.md",
+      "bytes": 5977
+    },
+    {
+      "name": "07_ClaudeCode_フェーズ別プロンプト集.md",
+      "bytes": 6398
+    },
+    {
+      "name": "08_手動試聴_DAW検証仕様書.md",
+      "bytes": 4679
+    },
+    {
+      "name": "09_意思決定ログ_テンプレート.md",
+      "bytes": 812
+    }
+  ]
+}

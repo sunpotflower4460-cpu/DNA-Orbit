@@ -1,35 +1,13 @@
 #include "PluginEditor.h"
 #include "Parameters.h"
+#include "Presets.h"
 
+using namespace dnaorbit;
 using dnaorbit::ui::jp;
 
-namespace
+juce::ValueTree DNAOrbitAudioProcessorEditor::uiStateTree() const
 {
-    using namespace dnaorbit;
-
-    /** Factory presets, named after what they DO rather than what they are. */
-    struct Preset
-    {
-        const char* name;
-        float rate, radius, depth, symmetry, twist, core, mix;
-        bool nullCore;
-    };
-
-    const Preset presets[] = {
-        { "ボーカルを広げる",   0.10f,  75.0f, 45.0f, 100.0f, 4.0f, 10.0f, 30.0f, false },
-        { "パッドを回す",       0.18f, 100.0f, 65.0f, 100.0f, 7.0f, 10.0f, 45.0f, false },
-        { "ギターに揺らぎ",     0.08f,  80.0f, 60.0f,  88.0f, 6.0f, 15.0f, 40.0f, false },
-        { "シンセを速く回す",   0.60f,  90.0f, 70.0f, 100.0f, 8.0f,  0.0f, 40.0f, false },
-        { "実験:中心を消す",   0.04f, 100.0f, 50.0f, 100.0f, 8.0f,  0.0f, 30.0f, true  },
-    };
-
-    constexpr int numPresets = (int) (sizeof (presets) / sizeof (presets[0]));
-
-    void setParameter (juce::AudioProcessorValueTreeState& apvts, const char* id, float actualValue)
-    {
-        if (auto* parameter = apvts.getParameter (id))
-            parameter->setValueNotifyingHost (parameter->convertTo0to1 (actualValue));
-    }
+    return processorRef.apvts.state.getOrCreateChildWithName (dnaorbit::params::uiStateNodeID, nullptr);
 }
 
 juce::Font DNAOrbitAudioProcessorEditor::japaneseFont (float height, bool bold)
@@ -53,6 +31,7 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
     subtitleLabel.setFont (japaneseFont (11.0f));
     subtitleLabel.setColour (juce::Label::textColourId,
                              dnaorbit::ui::DnaLookAndFeel::textColour().withAlpha (0.6f));
+    subtitleLabel.setTooltip (jp("Ctrl+Z(macではCmd+Z)で元に戻す、Ctrl+Shift+Zでやり直せます。"));
     addAndMakeVisible (subtitleLabel);
 
     addAndMakeVisible (helixView);
@@ -78,16 +57,41 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
     addAndMakeVisible (presetLabel);
 
     presetBox.setTextWhenNothingSelected (jp("選んでください"));
-    for (int i = 0; i < numPresets; ++i)
-        presetBox.addItem (jp (presets[i].name), i + 1);
+    for (int i = 0; i < dnaorbit::presets::numPresets; ++i)
+        presetBox.addItem (jp (dnaorbit::presets::presets[i].name), i + 1);
     presetBox.setTooltip (jp("まずここから選ぶのがおすすめです。つまみは後から微調整できます。"));
     addAndMakeVisible (presetBox);
     presetBox.onChange = [this]
     {
         const int index = presetBox.getSelectedId() - 1;
-        if (index >= 0 && index < numPresets)
+        if (index >= 0 && index < dnaorbit::presets::numPresets)
             applyPreset (index);
     };
+
+    revertButton.setButtonText (jp("元に戻す"));
+    revertButton.setTooltip (jp("プリセットを選んだ後に動かしたつまみを、プリセットの値に戻します。"));
+    revertButton.onClick = [this]
+    {
+        if (currentPresetIndex >= 0 && currentPresetIndex < dnaorbit::presets::numPresets)
+            applyPreset (currentPresetIndex);
+    };
+    addAndMakeVisible (revertButton);
+    revertButton.setVisible (false);
+
+    // --- Soft Bypass (top bar, both tabs) ---------------------------------------
+    bypassButton.setButtonText (jp("バイパス"));
+    bypassButton.setColour (juce::ToggleButton::tickColourId, dnaorbit::ui::DnaLookAndFeel::warningColour());
+    bypassButton.setTooltip (jp("プラグイン内蔵のバイパスです(ホスト側のBypassとは別)。")
+                             + jp("約30msでドライ音へなめらかに切り替わり、クリックが出ません。")
+                             + jp("軌道の位相は裏側で回り続けるので、解除しても不自然な段差は出ません。"));
+    addAndMakeVisible (bypassButton);
+    bypassAttachment = std::make_unique<ButtonAttachment> (processorRef.apvts, params::softBypassID, bypassButton);
+
+    monoPreviewButton.setButtonText (jp("モノ確認"));
+    monoPreviewButton.setTooltip (jp("最終出力をモノラルに折り畳んで試聴します(モニター専用)。")
+                                  + jp("約30msでなめらかに切り替わります。左右の打ち消しがないか確認するのに使います。"));
+    addAndMakeVisible (monoPreviewButton);
+    monoPreviewAttachment = std::make_unique<ButtonAttachment> (processorRef.apvts, params::monoPreviewID, monoPreviewButton);
 
     // --- Basic page knobs -------------------------------------------------------
     setUpKnob (rateKnob, params::rateID, jp("速さ"), jp("1周する時間"),
@@ -109,6 +113,12 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
                jp("中心軸に元の音をどれだけ残すかです。0%で中心が空洞、上げると中央に芯が現れます。"));
     setUpKnob (outputKnob, params::outputID, jp("出力"), jp("最終音量"),
                jp("最終的な出力音量の微調整です。"));
+    setUpKnob (stereoPreserveKnob, params::stereoPreserveID, jp("ステレオ保持"), jp("左右の情報量"),
+               jp("エフェクト音に元のステレオ感をどれだけ残すかです。0%は中央成分のみ、")
+               + jp("100%で元の左右の広がりがそのまま加わります。逆位相の素材でも音が消えにくくなります。"));
+    setUpKnob (bassAnchorKnob, params::bassAnchorHzID, jp("低音アンカー"), jp("低域を安定させる"),
+               jp("設定した周波数より下の低音は軌道に乗らず、元の定位のまま真っ直ぐ残ります。")
+               + jp("Offで無効。キックやベースの中心が動いて不安定に感じるときに上げてください。"));
 
     syncButton.setButtonText (jp("テンポ同期"));
     syncButton.setTooltip (jp("ホストのテンポに合わせて回転速度を決めます。テンポが取得できない場合は「速さ」の値に戻ります。"));
@@ -139,6 +149,37 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
                                + jp("モノラルにまとめるとエフェクト音がほぼ消えます。通常は切っておいてください。"));
     addAndMakeVisible (nullCoreButton);
     nullCoreAttachment = std::make_unique<ButtonAttachment> (processorRef.apvts, params::nullCoreID, nullCoreButton);
+
+    characterLabel.setText (jp("音色"), juce::dontSendNotification);
+    characterLabel.setFont (japaneseFont (11.0f));
+    characterLabel.setJustificationType (juce::Justification::centredLeft);
+    characterLabel.setColour (juce::Label::textColourId, dnaorbit::ui::DnaLookAndFeel::textColour());
+    addAndMakeVisible (characterLabel);
+
+    characterBox.addItemList (juce::StringArray { jp ("ナチュラル"), jp ("ビビッド"), jp ("ディープ") }, 1);
+    characterBox.setTooltip (jp("背後に回ったときの音の変化の強さです。ナチュラルが既定(従来の音)、")
+                             + jp("ビビッド・ディープと進むほど背後で暗く/揺れが大きくなります。"));
+    addAndMakeVisible (characterBox);
+    characterAttachment = std::make_unique<ComboAttachment> (processorRef.apvts, params::characterID, characterBox);
+
+    phaseModeLabel.setText (jp("位相"), juce::dontSendNotification);
+    phaseModeLabel.setFont (japaneseFont (11.0f));
+    phaseModeLabel.setJustificationType (juce::Justification::centredLeft);
+    phaseModeLabel.setColour (juce::Label::textColourId, dnaorbit::ui::DnaLookAndFeel::textColour());
+    addAndMakeVisible (phaseModeLabel);
+
+    phaseModeBox.addItemList (juce::StringArray { jp ("フリー"), jp ("リトリガー"), jp ("ホスト同期") }, 1);
+    phaseModeBox.setTooltip (jp("フリーは今までどおり自由に回り続けます。リトリガーは再生開始のたびに")
+                             + jp("開始位相へ戻ります。ホスト同期はDAWの再生位置(PPQ)から位相を直接")
+                             + jp("計算するので、ループやジャンプをしても常にタイムラインと一致します。"));
+    addAndMakeVisible (phaseModeBox);
+    phaseModeAttachment = std::make_unique<ComboAttachment> (processorRef.apvts, params::phaseModeID, phaseModeBox);
+
+    directionBox.addItemList (juce::StringArray { "CW", "CCW" }, 1);
+    directionBox.setTooltip (jp("回転方向です。CWは時計回り、CCWは反時計回り。")
+                             + jp("ホスト同期のときは位相の進む向きにも影響します。"));
+    addAndMakeVisible (directionBox);
+    directionAttachment = std::make_unique<ComboAttachment> (processorRef.apvts, params::directionID, directionBox);
 
     // --- Readouts ---------------------------------------------------------------
     // Monospaced with a fixed sign column: digit-width jitter at high refresh
@@ -171,16 +212,23 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
         nullCoreWatcher->sendInitialUpdate();
     }
 
-    showPage (processorRef.apvts.state.getProperty ("editorPage", 0));
+    showPage (uiStateTree().getProperty (params::editorPagePropertyID, 0));
 
     setResizable (true, true);
     setResizeLimits (780, 540, 1600, 1100);
 
-    const int savedWidth  = processorRef.apvts.state.getProperty ("editorWidth", 900);
-    const int savedHeight = processorRef.apvts.state.getProperty ("editorHeight", 620);
+    const int savedWidth  = uiStateTree().getProperty (params::editorWidthPropertyID, 900);
+    const int savedHeight = uiStateTree().getProperty (params::editorHeightPropertyID, 620);
     setSize (juce::jlimit (780, 1600, savedWidth), juce::jlimit (540, 1100, savedHeight));
 
     startTimerHz (12);
+
+    // Ctrl+Z / Ctrl+Shift+Z (Cmd on macOS, via commandModifier) for
+    // Undo/Redo - see keyPressed() and the undoManager member on
+    // DNAOrbitAudioProcessor. Key events bubble up from whichever child has
+    // focus to this top-level component if unhandled, so this alone is
+    // enough without wiring every individual control.
+    setWantsKeyboardFocus (true);
 }
 
 DNAOrbitAudioProcessorEditor::~DNAOrbitAudioProcessorEditor()
@@ -216,25 +264,15 @@ void DNAOrbitAudioProcessorEditor::setUpKnob (Knob& knob, const juce::String& pa
 
 void DNAOrbitAudioProcessorEditor::applyPreset (int presetIndex)
 {
-    const auto& preset = presets[presetIndex];
-    auto& apvts = processorRef.apvts;
-
-    setParameter (apvts, params::rateID, preset.rate);
-    setParameter (apvts, params::radiusID, preset.radius);
-    setParameter (apvts, params::depthID, preset.depth);
-    setParameter (apvts, params::symmetryID, preset.symmetry);
-    setParameter (apvts, params::twistID, preset.twist);
-    setParameter (apvts, params::coreID, preset.core);
-    setParameter (apvts, params::mixID, preset.mix);
-
-    if (auto* nullCore = apvts.getParameter (params::nullCoreID))
-        nullCore->setValueNotifyingHost (preset.nullCore ? 1.0f : 0.0f);
+    dnaorbit::presets::apply (processorRef.apvts, dnaorbit::presets::presets[presetIndex],
+                              &processorRef.undoManager);
+    currentPresetIndex = presetIndex;
 }
 
 void DNAOrbitAudioProcessorEditor::showPage (int page)
 {
     currentPage = juce::jlimit (0, 1, page);
-    processorRef.apvts.state.setProperty ("editorPage", currentPage, nullptr);
+    uiStateTree().setProperty (params::editorPagePropertyID, currentPage, nullptr);
 
     const bool basic = currentPage == 0;
 
@@ -245,7 +283,7 @@ void DNAOrbitAudioProcessorEditor::showPage (int page)
         knob->hintLabel.setVisible (basic);
     }
 
-    for (auto* knob : { &symmetryKnob, &twistKnob, &coreKnob, &outputKnob })
+    for (auto* knob : { &symmetryKnob, &twistKnob, &coreKnob, &outputKnob, &stereoPreserveKnob, &bassAnchorKnob })
     {
         knob->slider.setVisible (! basic);
         knob->nameLabel.setVisible (! basic);
@@ -257,9 +295,16 @@ void DNAOrbitAudioProcessorEditor::showPage (int page)
     divisionLabel.setVisible (! basic);
     autoGainButton.setVisible (! basic);
     nullCoreButton.setVisible (! basic);
+    characterBox.setVisible (! basic);
+    characterLabel.setVisible (! basic);
+    phaseModeBox.setVisible (! basic);
+    phaseModeLabel.setVisible (! basic);
+    directionBox.setVisible (! basic);
 
     presetBox.setVisible (basic);
     presetLabel.setVisible (basic);
+    if (! basic)
+        revertButton.setVisible (false);
 
     const auto activeColour = dnaorbit::ui::DnaLookAndFeel::strandAColour().withAlpha (0.35f);
     const auto idleColour = dnaorbit::ui::DnaLookAndFeel::panelColour();
@@ -268,6 +313,24 @@ void DNAOrbitAudioProcessorEditor::showPage (int page)
 
     resized();
     repaint();
+}
+
+bool DNAOrbitAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
+{
+    if (key == juce::KeyPress ('z', juce::ModifierKeys::commandModifier, 0))
+    {
+        processorRef.undoManager.undo();
+        return true;
+    }
+
+    if (key == juce::KeyPress ('z', juce::ModifierKeys::commandModifier | juce::ModifierKeys::shiftModifier, 0)
+        || key == juce::KeyPress ('y', juce::ModifierKeys::commandModifier, 0))
+    {
+        processorRef.undoManager.redo();
+        return true;
+    }
+
+    return false;
 }
 
 void DNAOrbitAudioProcessorEditor::timerCallback()
@@ -294,6 +357,20 @@ void DNAOrbitAudioProcessorEditor::timerCallback()
          << "相関  " << juce::String (helixView.getCorrelation(), 2);
 
     readoutLabel.setText (text, juce::dontSendNotification);
+
+    // Modified/Revert: once anything drifts from the picked preset's stored
+    // values, offer to snap back to it. Cheap enough to just recompute on
+    // this already-ticking timer rather than wiring up 12 parameter listeners.
+    if (currentPage == 0 && currentPresetIndex >= 0 && currentPresetIndex < dnaorbit::presets::numPresets)
+    {
+        const bool modified = ! dnaorbit::presets::matchesCurrentState (
+            processorRef.apvts, dnaorbit::presets::presets[currentPresetIndex]);
+        revertButton.setVisible (modified);
+    }
+    else
+    {
+        revertButton.setVisible (false);
+    }
 }
 
 void DNAOrbitAudioProcessorEditor::paint (juce::Graphics& g)
@@ -303,7 +380,7 @@ void DNAOrbitAudioProcessorEditor::paint (juce::Graphics& g)
     // Panel behind the control area.
     auto area = getLocalBounds().reduced (12);
     area.removeFromTop (44);
-    const auto controlArea = area.removeFromBottom (128);
+    const auto controlArea = area.removeFromBottom (152);
     g.setColour (dnaorbit::ui::DnaLookAndFeel::panelColour().withAlpha (0.6f));
     g.fillRoundedRectangle (controlArea.toFloat(), 6.0f);
 }
@@ -326,14 +403,14 @@ void DNAOrbitAudioProcessorEditor::layOutKnobRow (juce::Rectangle<int> row, cons
 
 void DNAOrbitAudioProcessorEditor::resized()
 {
-    processorRef.apvts.state.setProperty ("editorWidth", getWidth(), nullptr);
-    processorRef.apvts.state.setProperty ("editorHeight", getHeight(), nullptr);
+    uiStateTree().setProperty (params::editorWidthPropertyID, getWidth(), nullptr);
+    uiStateTree().setProperty (params::editorHeightPropertyID, getHeight(), nullptr);
 
     auto area = getLocalBounds().reduced (12);
 
     // --- Top bar ---------------------------------------------------------------
     auto topBar = area.removeFromTop (44);
-    auto titleArea = topBar.removeFromLeft (250);
+    auto titleArea = topBar.removeFromLeft (220);
     titleLabel.setBounds (titleArea.removeFromTop (24));
     subtitleLabel.setBounds (titleArea);
 
@@ -342,13 +419,22 @@ void DNAOrbitAudioProcessorEditor::resized()
     tabArea.removeFromLeft (4);
     detailTabButton.setBounds (tabArea.removeFromLeft (66));
 
-    auto presetArea = topBar.removeFromRight (300).reduced (0, 9);
-    presetLabel.setBounds (presetArea.removeFromLeft (80));
+    auto presetArea = topBar.removeFromRight (320).reduced (0, 9);
+    revertButton.setBounds (presetArea.removeFromRight (58));
+    presetArea.removeFromRight (6);
+    presetLabel.setBounds (presetArea.removeFromLeft (74));
     presetArea.removeFromLeft (6);
     presetBox.setBounds (presetArea);
 
+    // Whatever remains of topBar (between the tabs and the preset menu) is
+    // the Soft Bypass / Mono Preview toggles - visible on both pages since
+    // they are top-level, always-relevant controls.
+    auto utilityArea = topBar.reduced (4, 9);
+    bypassButton.setBounds (utilityArea.removeFromLeft (utilityArea.getWidth() / 2));
+    monoPreviewButton.setBounds (utilityArea);
+
     // --- Control area ----------------------------------------------------------
-    auto controlArea = area.removeFromBottom (128).reduced (8);
+    auto controlArea = area.removeFromBottom (152).reduced (8);
 
     if (currentPage == 0)
     {
@@ -370,7 +456,18 @@ void DNAOrbitAudioProcessorEditor::resized()
         toggleColumn.removeFromTop (4);
         nullCoreButton.setBounds (toggleColumn.removeFromTop (26));
 
-        layOutKnobRow (controlArea, { &symmetryKnob, &twistKnob, &coreKnob, &outputKnob });
+        toggleColumn.removeFromTop (4);
+        auto characterRow = toggleColumn.removeFromTop (26);
+        characterLabel.setBounds (characterRow.removeFromLeft (34));
+        characterBox.setBounds (characterRow);
+
+        toggleColumn.removeFromTop (4);
+        auto phaseRow = toggleColumn; // whatever remains
+        phaseModeLabel.setBounds (phaseRow.removeFromLeft (34));
+        directionBox.setBounds (phaseRow.removeFromRight (54));
+        phaseModeBox.setBounds (phaseRow);
+
+        layOutKnobRow (controlArea, { &symmetryKnob, &twistKnob, &coreKnob, &outputKnob, &stereoPreserveKnob, &bassAnchorKnob });
     }
 
     // --- Centre: readouts | 3D helix ------------------------------------------

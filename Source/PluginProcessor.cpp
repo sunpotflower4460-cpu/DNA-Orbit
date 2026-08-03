@@ -1,11 +1,41 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include <cmath>
+
+namespace
+{
+    /**
+     * Every project saved before editor state got its own child node (see
+     * params::uiStateNodeID) has editorPage/editorWidth/editorHeight as flat
+     * properties directly on the root state. Move them into the child node so
+     * an existing user's window size and tab selection still restore
+     * correctly under the new layout, then drop the old root copies so
+     * nothing reads two conflicting sources of truth going forward.
+     */
+    void migrateLegacyUiState (juce::ValueTree& root)
+    {
+        using namespace dnaorbit::params;
+
+        auto uiState = root.getOrCreateChildWithName (uiStateNodeID, nullptr);
+
+        for (const auto* legacyID : { editorPagePropertyID, editorWidthPropertyID, editorHeightPropertyID })
+        {
+            if (root.hasProperty (legacyID))
+            {
+                if (! uiState.hasProperty (legacyID))
+                    uiState.setProperty (legacyID, root.getProperty (legacyID), nullptr);
+
+                root.removeProperty (legacyID, nullptr);
+            }
+        }
+    }
+}
 
 DNAOrbitAudioProcessor::DNAOrbitAudioProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
                           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
-      apvts (*this, nullptr, "PARAMETERS", dnaorbit::params::createParameterLayout())
+      apvts (*this, &undoManager, "PARAMETERS", dnaorbit::params::createParameterLayout())
 {
     rateHzParam   = apvts.getRawParameterValue (dnaorbit::params::rateID);
     syncParam     = apvts.getRawParameterValue (dnaorbit::params::syncID);
@@ -19,11 +49,20 @@ DNAOrbitAudioProcessor::DNAOrbitAudioProcessor()
     mixParam      = apvts.getRawParameterValue (dnaorbit::params::mixID);
     outputParam   = apvts.getRawParameterValue (dnaorbit::params::outputID);
     autoGainParam = apvts.getRawParameterValue (dnaorbit::params::autoGainID);
+    stereoPreserveParam = apvts.getRawParameterValue (dnaorbit::params::stereoPreserveID);
+    bassAnchorHzParam   = apvts.getRawParameterValue (dnaorbit::params::bassAnchorHzID);
+    characterParam      = apvts.getRawParameterValue (dnaorbit::params::characterID);
+    phaseModeParam      = apvts.getRawParameterValue (dnaorbit::params::phaseModeID);
+    startPhaseParam     = apvts.getRawParameterValue (dnaorbit::params::startPhaseID);
+    directionParam      = apvts.getRawParameterValue (dnaorbit::params::directionID);
+    softBypassParam     = apvts.getRawParameterValue (dnaorbit::params::softBypassID);
+    monoPreviewParam    = apvts.getRawParameterValue (dnaorbit::params::monoPreviewID);
 }
 
 void DNAOrbitAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     engine.prepare (sampleRate, samplesPerBlock, getTotalNumOutputChannels());
+    bypassScratchBuffer.setSize (2, samplesPerBlock, false, false, true);
 
     // Without this, every SmoothedValue starts this session at its default
     // current value of 0 and only reaches the host's actual settings by
@@ -92,6 +131,47 @@ dnaorbit::dsp::HelixEngine::Parameters DNAOrbitAudioProcessor::currentParameterS
     p.mix01      = mixParam->load()      / 100.0f;
     p.outputDb   = outputParam->load();
     p.autoGain   = autoGainParam->load() > 0.5f;
+    p.stereoPreserve01 = stereoPreserveParam->load() / 100.0f;
+    p.bassAnchorHz     = bassAnchorHzParam->load();
+    // (int) of a NaN float is undefined behaviour; std::isfinite guards it
+    // before the cast rather than relying on HelixEngine's own clamp, which
+    // can only run after the cast has already happened.
+    const float characterRaw = characterParam->load();
+    p.character        = std::isfinite (characterRaw) ? (int) characterRaw : 0;
+
+    const float phaseModeRaw = phaseModeParam->load();
+    p.phaseMode      = std::isfinite (phaseModeRaw) ? (int) phaseModeRaw : 0;
+    p.startPhaseDeg  = startPhaseParam->load();
+    p.clockwise      = directionParam->load() < 0.5f; // choice index 0 = CW
+
+    // Host Lock needs the host's PPQ position and time signature directly
+    // (not just a derived rate), and Retrigger needs play-state edges -
+    // resolveRateHz() above already queried the playhead for BPM, but reads
+    // it again here rather than threading a shared snapshot through: this
+    // is a cheap query, not I/O, and keeping each concern self-contained is
+    // clearer than a shared-state parameter.
+    if (auto* currentPlayHead = getPlayHead())
+    {
+        if (const auto position = currentPlayHead->getPosition())
+        {
+            p.hostIsPlaying = position->getIsPlaying();
+
+            if (const auto ppq = position->getPpqPosition())
+                p.hostPpqPosition = *ppq;
+
+            double quarterNotesPerBar = 4.0;
+            if (const auto timeSig = position->getTimeSignature())
+                quarterNotesPerBar = (double) timeSig->numerator * 4.0
+                                    / (double) juce::jmax (1, timeSig->denominator);
+
+            const int divisionIndex = divisionParam != nullptr ? (int) divisionParam->load() : 2;
+            p.hostCycleBeats = dnaorbit::params::divisionIndexToBeats (divisionIndex, quarterNotesPerBar);
+        }
+    }
+
+    p.softBypass = softBypassParam->load() > 0.5f;
+    p.monoPreview = monoPreviewParam->load() > 0.5f;
+
     return p;
 }
 
@@ -115,12 +195,36 @@ void DNAOrbitAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& buf
 {
     const int totalNumInputChannels  = getTotalNumInputChannels();
     const int totalNumOutputChannels = getTotalNumOutputChannels();
+    const int numSamples = buffer.getNumSamples();
+
+    // Keep the engine's internal state (orbit phase, smoothers, filter/delay
+    // state, and the atomics the 3D visualiser reads) advancing while
+    // bypassed, instead of freezing it. Without this, un-bypassing resumes
+    // from a stale phase - a jump the host's own bypass toggle can make
+    // audible - and the helix view appears to simply stop while bypassed.
+    // This runs the real DSP on a scratch copy so the actual output stays an
+    // exact dry passthrough; only bypassScratchBuffer is written here.
+    //
+    // bypassScratchBuffer is sized once in prepareToPlay() and never resized
+    // on the audio thread. If a host ever hands us a block larger than it
+    // negotiated (a contract violation, but hosts do have bugs), skip the
+    // state advance rather than risk an audio-thread allocation - the dry
+    // passthrough below is unaffected either way.
+    if (numSamples <= bypassScratchBuffer.getNumSamples())
+    {
+        for (int ch = 0; ch < 2; ++ch)
+            bypassScratchBuffer.copyFrom (ch, 0, buffer, juce::jmin (ch, totalNumInputChannels - 1), 0, numSamples);
+
+        juce::AudioBuffer<float> scratchView (bypassScratchBuffer.getArrayOfWritePointers(), 2, numSamples);
+        engine.setParameters (currentParameterSnapshot());
+        engine.process (scratchView, totalNumInputChannels);
+    }
 
     // For mono-in/stereo-out, duplicate the input so bypass still yields a
     // sensible stereo signal that matches the input. Stereo-in/stereo-out is
     // already an untouched pass-through.
     for (int ch = totalNumInputChannels; ch < totalNumOutputChannels; ++ch)
-        buffer.copyFrom (ch, 0, buffer, 0, 0, buffer.getNumSamples());
+        buffer.copyFrom (ch, 0, buffer, 0, 0, numSamples);
 }
 
 juce::AudioProcessorEditor* DNAOrbitAudioProcessor::createEditor()
@@ -131,6 +235,8 @@ juce::AudioProcessorEditor* DNAOrbitAudioProcessor::createEditor()
 void DNAOrbitAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto state = apvts.copyState();
+    state.setProperty (dnaorbit::params::schemaVersionPropertyID,
+                        dnaorbit::params::currentStateSchemaVersion, nullptr);
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
     copyXmlToBinary (*xml, destData);
 }
@@ -145,7 +251,39 @@ void DNAOrbitAudioProcessor::setStateInformation (const void* data, int sizeInBy
     if (! xmlState->hasTagName (apvts.state.getType()))
         return;
 
+    // A project saved before this property existed has no schemaVersion at
+    // all - that is, by definition, schema 1 (today's format when the
+    // property was introduced), not "whatever the current version is".
+    // Read before replaceState: the source XML is the ground truth for what
+    // was actually saved, not any value already sitting on the live
+    // apvts.state.
+    loadedSchemaVersion = xmlState->getIntAttribute (dnaorbit::params::schemaVersionPropertyID,
+                                                      dnaorbit::params::legacyUnversionedSchema);
+
     apvts.replaceState (juce::ValueTree::fromXml (*xmlState));
+    migrateLegacyUiState (apvts.state);
+
+    // Stereo Preserve did not exist before schema 2: a schema-1 save has no
+    // stereoPreserve PARAM node at all, so APVTS already fell back to the
+    // parameter's declared (current-product) default of 70% via
+    // replaceState() above. Force it to 0% instead so a pre-existing project
+    // reproduces its original sound exactly - see the schema-version doc
+    // comment in Parameters.h and Tests/BaselineRegressionTests.cpp.
+    if (loadedSchemaVersion < dnaorbit::params::stereoPreserveIntroducedInSchema)
+    {
+        if (auto* stereoPreserve = apvts.getParameter (dnaorbit::params::stereoPreserveID))
+            stereoPreserve->setValueNotifyingHost (stereoPreserve->convertTo0to1 (dnaorbit::params::stereoPreserveLegacyPercent));
+    }
+
+    // Same reasoning for Bass Anchor: a save from before schema 3 has no
+    // bassAnchorHz PARAM node, so it is force-set to 20Hz (the exact DSP
+    // bypass value - see HelixEngine::process()) rather than the current
+    // product default.
+    if (loadedSchemaVersion < dnaorbit::params::bassAnchorIntroducedInSchema)
+    {
+        if (auto* bassAnchor = apvts.getParameter (dnaorbit::params::bassAnchorHzID))
+            bassAnchor->setValueNotifyingHost (bassAnchor->convertTo0to1 (dnaorbit::params::bassAnchorLegacyHz));
+    }
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

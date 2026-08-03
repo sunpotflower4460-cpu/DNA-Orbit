@@ -1,0 +1,15 @@
+# Local equivalent of the CI matrix's clang-tidy lane (no CI service is used
+# for this project - see docs/commercial-upgrade/). Scoped to Source/ via
+# HeaderFilterRegex so findings in JUCE's own headers (which this project
+# does not control) are not reported.
+#
+# clang-analyzer-optin.performance.Padding is disabled: it flags struct/class
+# field order (e.g. HelixEngine's ~36 padding bytes) as a pure memory-layout
+# micro-optimization with no correctness impact. Reordering dozens of
+# members in these heavily-tested, actively-changing types carries more
+# regression risk than the padding is worth.
+---
+Checks: 'clang-diagnostic-*,clang-analyzer-*,bugprone-*,performance-*,modernize-use-nullptr,modernize-use-override,modernize-use-equals-default,readability-else-after-return,readability-redundant-*,-bugprone-easily-swappable-parameters,-bugprone-narrowing-conversions,-performance-avoid-endl,-clang-analyzer-optin.performance.Padding'
+WarningsAsErrors: ''
+HeaderFilterRegex: '(^|/)Source/.*'
+FormatStyle: none

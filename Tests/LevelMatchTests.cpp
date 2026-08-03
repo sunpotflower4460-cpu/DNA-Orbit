@@ -229,6 +229,90 @@ namespace
                 expectLessThan (std::abs (db), 5.0);
             }
 
+            beginTest ("Auto gain's accuracy across Stereo Preserve (the bed is deliberately NOT compensated)");
+            {
+                // Strand/Core stay Mid-only regardless of Stereo Preserve (see
+                // ADR-004), so the existing geometry-only Auto Gain formula
+                // remains exactly as accurate for them at any Stereo Preserve
+                // value as it always was at 0%. The Stereo Preserve bed rides
+                // on top, deliberately uncompensated (a signal-dependent
+                // correction would risk pumping - see the wetMakeup comment in
+                // HelixEngine.cpp). This logs the real, measured deviation
+                // rather than asserting an untested number, so a future
+                // change that makes this meaningfully worse is caught here.
+                const float preserves[] = { 0.0f, 0.25f, 0.5f, 0.7f, 1.0f };
+                double worstDb = 0.0;
+                juce::String worstCase;
+
+                for (float preserve : preserves)
+                {
+                    for (bool correlatedStereo : { true, false })
+                    {
+                        HelixEngine::Parameters p;
+                        p.mix01 = 1.0f;
+                        p.rateHz = 2.0f;
+                        p.radius01 = 0.8f;
+                        p.depth01 = 0.55f;
+                        p.twistMs = 5.0f;
+                        p.core01 = 0.1f;
+                        p.autoGain = true;
+                        p.stereoPreserve01 = preserve;
+
+                        const double db = measureWetGainDb (p, true, correlatedStereo);
+                        logMessage ("stereoPreserve=" + juce::String (preserve, 2)
+                                    + (correlatedStereo ? " correlated" : " uncorrelated")
+                                    + ": " + juce::String (db, 2) + " dB");
+
+                        if (std::abs (db) > std::abs (worstDb))
+                        {
+                            worstDb = db;
+                            worstCase = "stereoPreserve=" + juce::String (preserve, 2)
+                                      + (correlatedStereo ? " correlated" : " uncorrelated");
+                        }
+                    }
+                }
+
+                logMessage ("Worst deviation across Stereo Preserve: " + juce::String (worstDb, 2)
+                            + " dB at " + worstCase);
+                // Wider bound than the 0%-only sweep above: the bed is
+                // measured, not guaranteed, to stay within this. If a future
+                // change needs a wider bound, widen it deliberately with a
+                // comment, not silently.
+                expectLessThan (std::abs (worstDb), 4.0,
+                                 "Stereo Preserve's uncompensated bed should not push Auto Gain's deviation "
+                                 "far beyond its 0%-only bound");
+            }
+
+            beginTest ("Correlation-aware Mix Law prevents a loudness bump at Mix 50% for correlated Dry/Wet");
+            {
+                // Low Radius/Depth (minimal strand decorrelation) and high
+                // Core make Wet closely resemble Dry - the scenario where the
+                // plain equal-power law's classic +3dB bump around Mix 50%
+                // would be most audible without this correction.
+                HelixEngine::Parameters p;
+                p.rateHz = 2.0f;
+                p.radius01 = 0.1f;
+                p.depth01 = 0.1f;
+                p.core01 = 0.9f;
+                p.twistMs = 0.0f;
+                p.autoGain = true;
+
+                p.mix01 = 0.0f;
+                const double db0 = measureWetGainDb (p, true, true);
+                p.mix01 = 0.5f;
+                const double db50 = measureWetGainDb (p, true, true);
+                p.mix01 = 1.0f;
+                const double db100 = measureWetGainDb (p, true, true);
+
+                logMessage ("Mix 0%: " + juce::String (db0, 2) + " dB, Mix 50%: " + juce::String (db50, 2)
+                            + " dB, Mix 100%: " + juce::String (db100, 2) + " dB");
+
+                expectLessThan (std::abs (db0), 0.1, "Test setup: Mix 0% must be exactly Dry");
+                expectLessThan (db50, juce::jmax (db0, db100) + 1.5,
+                                 "Mix 50% must not read meaningfully louder than both endpoints - "
+                                 "that gap is the correlated-blend bump this correction exists to remove");
+            }
+
             beginTest ("Correlation meter reports sane values for known signals");
             {
                 struct Case { const char* name; bool mono; bool inverted; float expected; };

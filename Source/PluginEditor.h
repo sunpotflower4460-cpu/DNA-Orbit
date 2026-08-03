@@ -14,6 +14,7 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    bool keyPressed (const juce::KeyPress&) override;
 
 private:
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
@@ -36,6 +37,9 @@ private:
     void applyPreset (int presetIndex);
     void timerCallback() override;
 
+    /** Child ValueTree holding editor-only state (tab, window size); see Parameters.h. */
+    juce::ValueTree uiStateTree() const;
+
     /** Prefers a real Japanese font: fontconfig's default for ja can be a Chinese face. */
     static juce::Font japaneseFont (float height, bool bold = false);
 
@@ -54,20 +58,40 @@ private:
 
     juce::ComboBox presetBox;
     juce::Label presetLabel;
+    juce::TextButton revertButton;
+
+    // Always visible (both tabs), in the top bar: an in-plugin Soft Bypass,
+    // independent of the host's own Bypass (ADR-008), and a Mono Preview
+    // monitoring toggle (ADR-009).
+    juce::ToggleButton bypassButton, monoPreviewButton;
+    std::unique_ptr<ButtonAttachment> bypassAttachment, monoPreviewAttachment;
+
+    // Tracks which factory preset (if any) is active, so the UI can show a
+    // "Modified" state once the user nudges anything and offer Revert.
+    // -1 means "no preset selected" (e.g. a project saved before this preset
+    // was picked, or one loaded from a DAW project rather than chosen here).
+    int currentPresetIndex = -1;
 
     // Basic page.
     Knob rateKnob, radiusKnob, depthKnob, mixKnob;
 
     // Detail page.
-    Knob symmetryKnob, twistKnob, coreKnob, outputKnob;
+    Knob symmetryKnob, twistKnob, coreKnob, outputKnob, stereoPreserveKnob, bassAnchorKnob;
     juce::ToggleButton syncButton;
     juce::ComboBox divisionBox;
     juce::Label divisionLabel;
     juce::ToggleButton autoGainButton;
     juce::ToggleButton nullCoreButton;
+    juce::ComboBox characterBox;
+    juce::Label characterLabel;
+    // Start Phase itself has no dedicated knob yet (deferred to Phase 5's UI
+    // pass); it remains fully controllable via the host's generic parameter
+    // list / automation in the meantime.
+    juce::ComboBox phaseModeBox, directionBox;
+    juce::Label phaseModeLabel;
 
     std::unique_ptr<ButtonAttachment> syncAttachment, autoGainAttachment, nullCoreAttachment;
-    std::unique_ptr<ComboAttachment> divisionAttachment;
+    std::unique_ptr<ComboAttachment> divisionAttachment, characterAttachment, phaseModeAttachment, directionAttachment;
 
     // Live readouts, updated on a slow timer so 45 fps helix repaints never
     // trigger glyph re-layout.

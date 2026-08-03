@@ -253,6 +253,305 @@ namespace
 
                 processor.releaseResources();
             }
+
+            beginTest ("A fresh instance with nothing loaded reports the current schema version");
+            {
+                DNAOrbitAudioProcessor processor;
+                expect (processor.getLoadedSchemaVersion() == dnaorbit::params::currentStateSchemaVersion,
+                        "A never-loaded instance has nothing to migrate, so it should report the current version");
+            }
+
+            beginTest ("Saving writes the current schema version; loading it back reports the same version");
+            {
+                DNAOrbitAudioProcessor processorA;
+                juce::MemoryBlock savedState;
+                processorA.getStateInformation (savedState);
+
+                DNAOrbitAudioProcessor processorB;
+                processorB.setStateInformation (savedState.getData(), (int) savedState.getSize());
+
+                expect (processorB.getLoadedSchemaVersion() == dnaorbit::params::currentStateSchemaVersion,
+                        "Loading a just-saved state must report the version that was actually saved");
+            }
+
+            beginTest ("A state saved before schema versioning existed is treated as schema 1, not crashing or defaulting to 0");
+            {
+                // Simulates every real project saved by a build before this
+                // property existed: its XML has no dnaOrbitSchemaVersion
+                // attribute at all.
+                DNAOrbitAudioProcessor processorA;
+                juce::MemoryBlock savedState;
+                processorA.getStateInformation (savedState);
+
+                std::unique_ptr<juce::XmlElement> xml (juce::AudioProcessor::getXmlFromBinary (
+                    savedState.getData(), (int) savedState.getSize()));
+                expect (xml != nullptr);
+
+                if (xml != nullptr)
+                {
+                    xml->removeAttribute (dnaorbit::params::schemaVersionPropertyID);
+
+                    juce::MemoryBlock unversionedState;
+                    juce::AudioProcessor::copyXmlToBinary (*xml, unversionedState);
+
+                    DNAOrbitAudioProcessor processorB;
+                    processorB.setStateInformation (unversionedState.getData(), (int) unversionedState.getSize());
+
+                    expect (processorB.getLoadedSchemaVersion() == 1,
+                            "A state with no version attribute predates versioning, which is schema 1 by definition");
+                }
+            }
+
+            beginTest ("Bypass keeps the engine's orbit phase advancing instead of freezing it");
+            {
+                DNAOrbitAudioProcessor processor;
+                processor.prepareToPlay (48000.0, 256);
+
+                juce::AudioBuffer<float> buffer (2, 256);
+                buffer.clear();
+                juce::MidiBuffer midi;
+
+                processor.processBlockBypassed (buffer, midi);
+                const float thetaAfterFirst = processor.getEngine().getVisualState().thetaA;
+
+                processor.processBlockBypassed (buffer, midi);
+                const float thetaAfterSecond = processor.getEngine().getVisualState().thetaA;
+
+                expect (std::abs (thetaAfterSecond - thetaAfterFirst) > 1.0e-5f,
+                        "Orbit phase must keep advancing across bypassed blocks, not freeze at its pre-bypass value");
+
+                processor.releaseResources();
+            }
+
+            beginTest ("Bypass with a block larger than prepareToPlay negotiated falls back safely, still dry");
+            {
+                // A host handing us a bigger block than it negotiated is a
+                // contract violation, but the fallback (skip the state
+                // advance, keep the dry passthrough) must never crash or
+                // touch the audible signal.
+                DNAOrbitAudioProcessor processor;
+                processor.prepareToPlay (48000.0, 256);
+
+                juce::AudioBuffer<float> buffer (2, 512);
+                for (int ch = 0; ch < 2; ++ch)
+                {
+                    auto* data = buffer.getWritePointer (ch);
+                    for (int n = 0; n < 512; ++n)
+                        data[n] = 0.4f * (float) std::sin (juce::MathConstants<double>::twoPi * 220.0 * n / 48000.0);
+                }
+
+                juce::AudioBuffer<float> original;
+                original.makeCopyOf (buffer);
+
+                juce::MidiBuffer midi;
+                processor.processBlockBypassed (buffer, midi);
+
+                for (int ch = 0; ch < 2; ++ch)
+                    for (int n = 0; n < 512; ++n)
+                        expectWithinAbsoluteError (buffer.getSample (ch, n), original.getSample (ch, n), 1.0e-6f);
+
+                processor.releaseResources();
+            }
+
+            beginTest ("A pre-Phase-1 save with flat editorPage/Width/Height properties migrates into the uiState child node");
+            {
+                // Every project saved before editor state got its own child
+                // node has these three directly on the root - simulate that
+                // exact shape rather than assuming today's getStateInformation
+                // already writes the new layout.
+                DNAOrbitAudioProcessor processorA;
+                juce::MemoryBlock savedState;
+                processorA.getStateInformation (savedState);
+
+                std::unique_ptr<juce::XmlElement> xml (juce::AudioProcessor::getXmlFromBinary (
+                    savedState.getData(), (int) savedState.getSize()));
+                expect (xml != nullptr);
+
+                if (xml != nullptr)
+                {
+                    xml->setAttribute ("editorPage", 1);
+                    xml->setAttribute ("editorWidth", 1234);
+                    xml->setAttribute ("editorHeight", 789);
+
+                    juce::MemoryBlock legacyState;
+                    juce::AudioProcessor::copyXmlToBinary (*xml, legacyState);
+
+                    DNAOrbitAudioProcessor processorB;
+                    processorB.setStateInformation (legacyState.getData(), (int) legacyState.getSize());
+
+                    expect (! processorB.apvts.state.hasProperty ("editorPage"),
+                            "Legacy flat editorPage must be removed from the root after migration");
+                    expect (! processorB.apvts.state.hasProperty ("editorWidth"),
+                            "Legacy flat editorWidth must be removed from the root after migration");
+                    expect (! processorB.apvts.state.hasProperty ("editorHeight"),
+                            "Legacy flat editorHeight must be removed from the root after migration");
+
+                    auto uiState = processorB.apvts.state.getChildWithName ("uiState");
+                    expect (uiState.isValid(), "Migration must create the uiState child node");
+                    expect ((int) uiState.getProperty ("editorPage", -1) == 1,
+                            "editorPage must survive the migration with its saved value");
+                    expect ((int) uiState.getProperty ("editorWidth", -1) == 1234,
+                            "editorWidth must survive the migration with its saved value");
+                    expect ((int) uiState.getProperty ("editorHeight", -1) == 789,
+                            "editorHeight must survive the migration with its saved value");
+                }
+            }
+
+            beginTest ("A save with no legacy UI properties at all still gets a uiState node without crashing");
+            {
+                DNAOrbitAudioProcessor processorA;
+                juce::MemoryBlock savedState;
+                processorA.getStateInformation (savedState);
+
+                DNAOrbitAudioProcessor processorB;
+                processorB.setStateInformation (savedState.getData(), (int) savedState.getSize());
+
+                expect (processorB.apvts.state.getChildWithName ("uiState").isValid());
+            }
+
+            beginTest ("A fresh instance defaults Stereo Preserve to 70%");
+            {
+                DNAOrbitAudioProcessor processor;
+                expectWithinAbsoluteError (
+                    processor.apvts.getRawParameterValue (dnaorbit::params::stereoPreserveID)->load(),
+                    70.0f, 1.0e-3f);
+            }
+
+            beginTest ("A schema-1 save (predating Stereo Preserve) loads with it forced to 0%, not the new default");
+            {
+                // Simulates a real project saved by a Phase-0/Phase-1 build:
+                // its XML has schemaVersion=1 and no stereoPreserve PARAM node
+                // at all, since the parameter did not exist yet. Without the
+                // schema-2 override, APVTS would fall back to the parameter's
+                // declared (current-product) default of 70%, silently
+                // changing that project's sound on load.
+                DNAOrbitAudioProcessor processorA;
+                juce::MemoryBlock savedState;
+                processorA.getStateInformation (savedState);
+
+                std::unique_ptr<juce::XmlElement> xml (juce::AudioProcessor::getXmlFromBinary (
+                    savedState.getData(), (int) savedState.getSize()));
+                expect (xml != nullptr);
+
+                if (xml != nullptr)
+                {
+                    xml->setAttribute (dnaorbit::params::schemaVersionPropertyID, 1);
+
+                    juce::XmlElement* stereoPreserveNode = nullptr;
+                    for (auto* child : xml->getChildIterator())
+                    {
+                        if (child->hasTagName ("PARAM")
+                            && child->getStringAttribute ("id") == dnaorbit::params::stereoPreserveID)
+                        {
+                            stereoPreserveNode = child;
+                            break;
+                        }
+                    }
+                    expect (stereoPreserveNode != nullptr, "Test setup: stereoPreserve PARAM node must exist to remove");
+                    if (stereoPreserveNode != nullptr)
+                        xml->removeChildElement (stereoPreserveNode, true);
+
+                    juce::MemoryBlock schema1State;
+                    juce::AudioProcessor::copyXmlToBinary (*xml, schema1State);
+
+                    DNAOrbitAudioProcessor processorB;
+                    processorB.setStateInformation (schema1State.getData(), (int) schema1State.getSize());
+
+                    expect (processorB.getLoadedSchemaVersion() == 1);
+                    expectWithinAbsoluteError (
+                        processorB.apvts.getRawParameterValue (dnaorbit::params::stereoPreserveID)->load(),
+                        0.0f, 1.0e-3f,
+                        "A schema-1 project must load with Stereo Preserve at 0%, reproducing its original sound");
+                }
+            }
+
+            beginTest ("A schema-2 save with a custom Stereo Preserve value round-trips unchanged");
+            {
+                DNAOrbitAudioProcessor processorA;
+                processorA.apvts.getParameter (dnaorbit::params::stereoPreserveID)->setValueNotifyingHost (0.42f);
+
+                juce::MemoryBlock savedState;
+                processorA.getStateInformation (savedState);
+
+                DNAOrbitAudioProcessor processorB;
+                processorB.setStateInformation (savedState.getData(), (int) savedState.getSize());
+
+                expect (processorB.getLoadedSchemaVersion() == dnaorbit::params::currentStateSchemaVersion);
+                expectWithinAbsoluteError (
+                    processorB.apvts.getRawParameterValue (dnaorbit::params::stereoPreserveID)->load(),
+                    processorA.apvts.getRawParameterValue (dnaorbit::params::stereoPreserveID)->load(),
+                    1.0e-3f,
+                    "A schema-2 save's chosen Stereo Preserve value must not be reset to 0 or the default");
+            }
+
+            beginTest ("A fresh instance defaults Bass Anchor to 120Hz");
+            {
+                DNAOrbitAudioProcessor processor;
+                expectWithinAbsoluteError (
+                    processor.apvts.getRawParameterValue (dnaorbit::params::bassAnchorHzID)->load(),
+                    120.0f, 1.0e-2f);
+            }
+
+            beginTest ("A schema-2 (or earlier) save predating Bass Anchor loads with it forced to 20Hz (Off)");
+            {
+                DNAOrbitAudioProcessor processorA;
+                juce::MemoryBlock savedState;
+                processorA.getStateInformation (savedState);
+
+                std::unique_ptr<juce::XmlElement> xml (juce::AudioProcessor::getXmlFromBinary (
+                    savedState.getData(), (int) savedState.getSize()));
+                expect (xml != nullptr);
+
+                if (xml != nullptr)
+                {
+                    xml->setAttribute (dnaorbit::params::schemaVersionPropertyID, 2);
+
+                    juce::XmlElement* bassAnchorNode = nullptr;
+                    for (auto* child : xml->getChildIterator())
+                    {
+                        if (child->hasTagName ("PARAM")
+                            && child->getStringAttribute ("id") == dnaorbit::params::bassAnchorHzID)
+                        {
+                            bassAnchorNode = child;
+                            break;
+                        }
+                    }
+                    expect (bassAnchorNode != nullptr, "Test setup: bassAnchorHz PARAM node must exist to remove");
+                    if (bassAnchorNode != nullptr)
+                        xml->removeChildElement (bassAnchorNode, true);
+
+                    juce::MemoryBlock schema2State;
+                    juce::AudioProcessor::copyXmlToBinary (*xml, schema2State);
+
+                    DNAOrbitAudioProcessor processorB;
+                    processorB.setStateInformation (schema2State.getData(), (int) schema2State.getSize());
+
+                    expect (processorB.getLoadedSchemaVersion() == 2);
+                    expectWithinAbsoluteError (
+                        processorB.apvts.getRawParameterValue (dnaorbit::params::bassAnchorHzID)->load(),
+                        20.0f, 1.0e-2f,
+                        "A schema-2 project must load with Bass Anchor Off (20Hz), reproducing its original sound");
+                }
+            }
+
+            beginTest ("A schema-3 save with a custom Bass Anchor value round-trips unchanged");
+            {
+                DNAOrbitAudioProcessor processorA;
+                processorA.apvts.getParameter (dnaorbit::params::bassAnchorHzID)->setValueNotifyingHost (0.3f);
+
+                juce::MemoryBlock savedState;
+                processorA.getStateInformation (savedState);
+
+                DNAOrbitAudioProcessor processorB;
+                processorB.setStateInformation (savedState.getData(), (int) savedState.getSize());
+
+                expect (processorB.getLoadedSchemaVersion() == dnaorbit::params::currentStateSchemaVersion);
+                expectWithinAbsoluteError (
+                    processorB.apvts.getRawParameterValue (dnaorbit::params::bassAnchorHzID)->load(),
+                    processorA.apvts.getRawParameterValue (dnaorbit::params::bassAnchorHzID)->load(),
+                    1.0e-2f,
+                    "A schema-3 save's chosen Bass Anchor value must not be reset to Off or the default");
+            }
         }
     };
 

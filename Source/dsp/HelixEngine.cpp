@@ -8,6 +8,7 @@ namespace dnaorbit::dsp
 
         const double smoothParamSeconds = 0.05;   // 50 ms for standard parameters
         const double nullCoreSeconds    = 0.12;   // 120 ms mode-switch crossfade
+        const double softBypassSeconds  = 0.03;   // 30 ms Soft Bypass / Mono Preview crossfade (ADR-008/009)
 
         radiusSmoothed.reset (sampleRate, smoothParamSeconds);
         depthSmoothed.reset (sampleRate, smoothParamSeconds);
@@ -19,11 +20,19 @@ namespace dnaorbit::dsp
         nullCoreMixSmoothed.reset (sampleRate, nullCoreSeconds);
         rateHzSmoothed.reset (sampleRate, smoothParamSeconds);
         autoGainAmountSmoothed.reset (sampleRate, nullCoreSeconds);
+        stereoPreserveSmoothed.reset (sampleRate, smoothParamSeconds);
+        softBypassSmoothed.reset (sampleRate, softBypassSeconds);
+        monoPreviewSmoothed.reset (sampleRate, softBypassSeconds);
 
         lowPassA.prepare (sampleRate);
         lowPassB.prepare (sampleRate);
 
-        // Enough headroom for max back-delay (8ms) + max twist (20ms) + margin.
+        bassAnchorL.prepare (sampleRate);
+        bassAnchorR.prepare (sampleRate);
+
+        // Enough headroom for max back-delay (14ms at Character=Deep) + max
+        // twist (20ms) + margin. 60ms budgeted comfortably covers the 34ms
+        // actually needed.
         const auto maxDelaySamples = (int) std::ceil (0.06 * sampleRate) + 16;
         delayA.setMaximumDelayInSamples (maxDelaySamples);
         delayB.setMaximumDelayInSamples (maxDelaySamples);
@@ -34,6 +43,11 @@ namespace dnaorbit::dsp
         delayB.prepare (spec);
 
         resyncSamplesTotal = juce::jmax (1, (int) std::round (resyncDurationSeconds * sampleRate));
+
+        // Standard EMA envelope-follower coefficient: state moves toward the
+        // instantaneous value by a fraction (1 - coefficient) each sample, so
+        // it reaches ~63% of a step change after correlationTimeConstantSeconds.
+        corrCoefficient = (float) std::exp (-1.0 / (correlationTimeConstantSeconds * sampleRate));
 
         isPrepared = true;
         reset();
@@ -47,11 +61,14 @@ namespace dnaorbit::dsp
         symmetryLocked = true;
         resyncStartError = 0.0;
         resyncSamplesRemaining = 0;
+        wasHostPlaying = false;
 
         lowPassA.reset();
         lowPassB.reset();
         delayA.reset();
         delayB.reset();
+        bassAnchorL.reset();
+        bassAnchorR.reset();
 
         radiusSmoothed.setCurrentAndTargetValue (radiusSmoothed.getCurrentValue());
         depthSmoothed.setCurrentAndTargetValue (depthSmoothed.getCurrentValue());
@@ -63,6 +80,9 @@ namespace dnaorbit::dsp
         nullCoreMixSmoothed.setCurrentAndTargetValue (nullCoreMixSmoothed.getCurrentValue());
         rateHzSmoothed.setCurrentAndTargetValue (rateHzSmoothed.getCurrentValue());
         autoGainAmountSmoothed.setCurrentAndTargetValue (autoGainAmountSmoothed.getCurrentValue());
+        stereoPreserveSmoothed.setCurrentAndTargetValue (stereoPreserveSmoothed.getCurrentValue());
+        softBypassSmoothed.setCurrentAndTargetValue (softBypassSmoothed.getCurrentValue());
+        monoPreviewSmoothed.setCurrentAndTargetValue (monoPreviewSmoothed.getCurrentValue());
 
         uiThetaA.store (0.0f, std::memory_order_relaxed);
         uiThetaB.store ((float) orbitmath::pi, std::memory_order_relaxed);
@@ -73,6 +93,10 @@ namespace dnaorbit::dsp
         uiCorrelation.store (1.0f, std::memory_order_relaxed);
         uiPhaseA.store (0.0, std::memory_order_relaxed);
         uiPhi.store ((float) orbitmath::pi, std::memory_order_relaxed);
+
+        corrDryPowState = 0.0f;
+        corrWetPowState = 0.0f;
+        corrCrossState = 0.0f;
     }
 
     namespace
@@ -111,12 +135,59 @@ namespace dnaorbit::dsp
         const float core01     = sanitizeParam (p.core01, 0.0f);
         const float mix01      = sanitizeParam (p.mix01, 0.35f);
         const float outputDb   = sanitizeParam (p.outputDb, 0.0f);
+        const float stereoPreserve01 = std::clamp (sanitizeParam (p.stereoPreserve01, 0.0f), 0.0f, 1.0f);
+        const float bassAnchorHz = std::clamp (sanitizeParam (p.bassAnchorHz, 20.0f), 20.0f, 500.0f);
+
+        // At most once per block, not per-sample - see the member comment in
+        // HelixEngine.h. The early-return-if-unchanged guard inside
+        // setCrossoverHz() means an unautomated Bass Anchor costs nothing
+        // extra here beyond a float comparison.
+        bassAnchorBypassed = bassAnchorHz <= 20.0f + 1.0e-3f;
+        if (! bassAnchorBypassed)
+        {
+            bassAnchorL.setCrossoverHz (bassAnchorHz);
+            bassAnchorR.setCrossoverHz (bassAnchorHz);
+        }
+
+        // Character: also applied at most once per block, not per-sample -
+        // see the member comment in HelixEngine.h. Natural reproduces the
+        // exact fixed constants this engine always used, by design.
+        switch (juce::jlimit (0, 2, p.character))
+        {
+            case 1: // Vivid
+                maxBackAttenDb = 5.0f;
+                backCutoffHz   = 4000.0f;
+                maxBackDelayMs = 10.0f;
+                break;
+            case 2: // Deep
+                maxBackAttenDb = 6.5f;
+                backCutoffHz   = 3000.0f;
+                maxBackDelayMs = 14.0f;
+                break;
+            default: // Natural
+                maxBackAttenDb = 4.0f;
+                backCutoffHz   = 5000.0f;
+                maxBackDelayMs = 8.0f;
+                break;
+        }
+
+        // Host Phase Lock: also read once per block - see the member
+        // comment in HelixEngine.h.
+        currentPhaseMode = juce::jlimit (0, 2, p.phaseMode);
+        currentStartPhaseDeg = std::isfinite (p.startPhaseDeg) ? p.startPhaseDeg : 0.0f;
+        currentClockwise = p.clockwise;
+        currentHostCycleBeats = std::isfinite (p.hostCycleBeats) && p.hostCycleBeats > 0.0
+                               ? p.hostCycleBeats : 4.0;
+        currentHostPpqPosition = std::isfinite (p.hostPpqPosition) ? p.hostPpqPosition : 0.0;
+        currentHostIsPlaying = p.hostIsPlaying;
 
         nullCoreTarget = p.nullCore;
 
         const float autoGainAmount = p.autoGain ? 1.0f : 0.0f;
         const float nullCoreAmount = p.nullCore ? 1.0f : 0.0f;
         const float outputGain = dbToGain (outputDb);
+        const float softBypassAmount = p.softBypass ? 1.0f : 0.0f;
+        const float monoPreviewAmount = p.monoPreview ? 1.0f : 0.0f;
 
         if (snapImmediately)
         {
@@ -135,6 +206,9 @@ namespace dnaorbit::dsp
             mixSmoothed.setCurrentAndTargetValue (mix01);
             outputGainSmoothed.setCurrentAndTargetValue (outputGain);
             nullCoreMixSmoothed.setCurrentAndTargetValue (nullCoreAmount);
+            stereoPreserveSmoothed.setCurrentAndTargetValue (stereoPreserve01);
+            softBypassSmoothed.setCurrentAndTargetValue (softBypassAmount);
+            monoPreviewSmoothed.setCurrentAndTargetValue (monoPreviewAmount);
         }
         else
         {
@@ -148,6 +222,9 @@ namespace dnaorbit::dsp
             mixSmoothed.setTargetValue (mix01);
             outputGainSmoothed.setTargetValue (outputGain);
             nullCoreMixSmoothed.setTargetValue (nullCoreAmount);
+            stereoPreserveSmoothed.setTargetValue (stereoPreserve01);
+            softBypassSmoothed.setTargetValue (softBypassAmount);
+            monoPreviewSmoothed.setTargetValue (monoPreviewAmount);
         }
 
         uiNullCoreOn.store (p.nullCore, std::memory_order_relaxed);
@@ -173,6 +250,51 @@ namespace dnaorbit::dsp
         // Block accumulators for the UI meters (computed on the output).
         double sumLL = 0.0, sumRR = 0.0, sumLR = 0.0;
 
+        // --- Host Phase Lock / Retrigger: block-level (control-rate) phase work ---
+        // Both only ever touch thetaA; thetaB (when Symmetry-locked) already
+        // follows thetaA + pi every sample via the existing lock logic below,
+        // so neither mode needs to touch thetaB separately.
+        double hostLockCorrectionPerSample = 0.0;
+
+        if (currentPhaseMode == 1) // Retrigger
+        {
+            if (currentHostIsPlaying && ! wasHostPlaying)
+            {
+                const double startRad = (currentClockwise ? 1.0 : -1.0)
+                                       * (double) currentStartPhaseDeg * orbitmath::pi / 180.0;
+                thetaA = orbitmath::wrapTwoPi (startRad);
+                thetaB = orbitmath::wrapTwoPi (thetaA + orbitmath::pi);
+                symmetryLocked = true;
+                resyncSamplesRemaining = 0;
+            }
+        }
+        else if (currentPhaseMode == 2 && currentHostIsPlaying) // Host Lock
+        {
+            // phase = 2*pi * fract(direction * (ppq - startPhaseBeats) / cycleBeats)
+            // - the spec's formula, computed once per block from the host's
+            // PPQ position. Rather than snapping thetaA to this target (which
+            // would click on every ordinary rounding/reporting jitter) or
+            // maintaining a separate stateful resync ramp, add a small extra
+            // angular velocity proportional to the current error - a simple
+            // proportional controller that converges within the spec's
+            // 20-50ms window (hostLockCorrectionTimeConstantSeconds) for both
+            // ordinary per-block drift and genuine transport jumps (loops,
+            // scrubbing) alike, and is stable by construction (first-order,
+            // no overshoot) since it always pulls toward the freshly
+            // recomputed target rather than an aging one.
+            const double phaseOffsetBeats = ((double) currentStartPhaseDeg / 360.0) * currentHostCycleBeats;
+            const double directionSign = currentClockwise ? 1.0 : -1.0;
+            double fraction = std::fmod (directionSign * (currentHostPpqPosition - phaseOffsetBeats)
+                                          / currentHostCycleBeats, 1.0);
+            if (fraction < 0.0)
+                fraction += 1.0;
+            const double targetTheta = fraction * orbitmath::twoPi;
+            const double error = orbitmath::shortestAngleDelta (thetaA, targetTheta);
+            hostLockCorrectionPerSample = error / (hostLockCorrectionTimeConstantSeconds * sampleRate);
+        }
+
+        wasHostPlaying = currentHostIsPlaying;
+
         for (int n = 0; n < numSamples; ++n)
         {
             const float radius   = radiusSmoothed.getNextValue();
@@ -185,6 +307,9 @@ namespace dnaorbit::dsp
             const float nullCoreAmount = nullCoreMixSmoothed.getNextValue();
             const float rateHz   = rateHzSmoothed.getNextValue();
             const float autoGainAmount = autoGainAmountSmoothed.getNextValue();
+            const float stereoPreserve = stereoPreserveSmoothed.getNextValue();
+            const float softBypassAmt = softBypassSmoothed.getNextValue();
+            const float monoPreviewAmt = monoPreviewSmoothed.getNextValue();
 
             // Sanitized at the single point audio enters the engine: the two
             // one-pole filters below are recursive (state depends on the
@@ -197,12 +322,56 @@ namespace dnaorbit::dsp
             // (sin/cos/exp/clamp) stays finite.
             const float sampleInL = std::isfinite (inL[n]) ? inL[n] : 0.0f;
             const float sampleInR = stereoIn ? (std::isfinite (inR[n]) ? inR[n] : 0.0f) : sampleInL;
-            const float wetSource = stereoIn ? 0.5f * (sampleInL + sampleInR) : sampleInL;
             const float dryL = sampleInL;
             const float dryR = sampleInR;
 
+            // --- Bass Anchor: split into a low band (direct, non-orbiting) --------
+            // and a high band (feeds the orbit machinery below). Bypassed
+            // entirely at bassAnchorBypassed (the 20Hz/"Off" state), so the
+            // high band is then simply the raw input - this identity is what
+            // makes 20Hz reproduce schema-2-and-earlier's sound exactly.
+            float lowL = 0.0f, lowR = 0.0f;
+            float orbitInL = sampleInL, orbitInR = sampleInR;
+            if (! bassAnchorBypassed)
+            {
+                const auto lhL = bassAnchorL.processSample (sampleInL);
+                const auto lhR = bassAnchorR.processSample (sampleInR);
+                lowL = lhL.low;
+                lowR = lhR.low;
+                orbitInL = lhL.high;
+                orbitInR = lhR.high;
+            }
+
+            // --- Stereo Preserve: Mid orbit + a separate Side "bed" -------------
+            // Both strands and Core are fed from Mid ONLY, always - never from
+            // L/R directly - so the orbit's energy is always exactly balanced
+            // between Strand A and Strand B, whatever the input's L/R balance
+            // is. (An earlier version fed sourceA = M + p*S, sourceB = M - p*S
+            // directly: geometrically antipodal, but for an asymmetric input
+            // such as L-only, Strand A could carry far more energy than
+            // Strand B, so the *perceptual* centre drifted toward Strand A
+            // even though the two strands' *positions* stayed exactly
+            // opposite. See ADR-004 for the measurements that led here.)
+            // The input's Side content is instead added back as a separate,
+            // non-orbiting bed at amount stereoPreserve, restoring width and
+            // fixing anti-phase collapse-to-silence without coupling either
+            // strand's loudness to the input's L/R balance.
+            //
+            // mid/side of a mono-duplicated input (stereoIn == false) always
+            // gives side == 0, so the bed is silent and mono input is
+            // unaffected by this parameter. At stereoPreserve == 0 the bed
+            // contributes nothing at all, which is exactly the old shared-
+            // mono-downmix Wet source: this is what makes stereoPreserve == 0
+            // reproduce the schema-1 sound (including anti-phase input
+            // collapsing Wet to silence), see Tests/BaselineRegressionTests.cpp.
+            const float mid  = stereoIn ? 0.5f * (orbitInL + orbitInR) : orbitInL;
+            const float side = stereoIn ? 0.5f * (orbitInL - orbitInR) : 0.0f;
+            const float bedL = stereoPreserve * side;
+            const float bedR = -stereoPreserve * side;
+
             // --- Orbit angle update -------------------------------------------------
-            const double incA = orbitmath::angularIncrement ((double) rateHz, sampleRate);
+            const double incA = orbitmath::angularIncrement ((double) rateHz, sampleRate)
+                               + hostLockCorrectionPerSample;
             thetaA = orbitmath::wrapTwoPi (thetaA + incA);
             phaseAccumA = std::fmod (phaseAccumA + incA, phaseModulus);
 
@@ -257,7 +426,7 @@ namespace dnaorbit::dsp
             const float backGainA = dbToGain (gainDbA);
             const float cutoffA = frontCutoffHz + (backCutoffHz - frontCutoffHz) * (float) backAmountA * depth;
             lowPassA.setCutoffHz (cutoffA);
-            const float filteredA = lowPassA.processSample (wetSource * backGainA);
+            const float filteredA = lowPassA.processSample (mid * backGainA);
 
             const float backDelayMsA = maxBackDelayMs * (float) backAmountA * depth;
             const float delaySamplesA = std::clamp ((backDelayMsA * 0.001f) * (float) sampleRate, 0.0f, maxDelaySamplesStored - 1.0f);
@@ -276,7 +445,7 @@ namespace dnaorbit::dsp
             const float backGainB = dbToGain (gainDbB);
             const float cutoffB = frontCutoffHz + (backCutoffHz - frontCutoffHz) * (float) backAmountB * depth;
             lowPassB.setCutoffHz (cutoffB);
-            const float filteredB = lowPassB.processSample (wetSource * backGainB);
+            const float filteredB = lowPassB.processSample (mid * backGainB);
 
             const float backDelayMsB = maxBackDelayMs * (float) backAmountB * depth;
             const float delaySamplesB = std::clamp (((backDelayMsB + twistMs) * 0.001f) * (float) sampleRate, 0.0f, maxDelaySamplesStored - 1.0f);
@@ -289,13 +458,32 @@ namespace dnaorbit::dsp
             const float strandBL = delayedB * (float) gainsB.left * strandGain;
             const float strandBR = delayedB * (float) gainsB.right * strandGain;
 
-            // --- Wet sum, Core, NULL CORE --------------------------------------------
+            // --- Wet sum, Core, Stereo Preserve bed, Bass Anchor, NULL CORE -----------
             float wetL = strandAL + strandBL;
             float wetR = strandAR + strandBR;
 
-            const float coreSignal = wetSource * core;
-            wetL += coreSignal;
-            wetR += coreSignal;
+            // Core stays Mid-based like the strands - a stable, always-
+            // balanced anchor at the centre, consistent with the orbit.
+            wetL += mid * core;
+            wetR += mid * core;
+
+            // The Stereo Preserve bed is added after Core, before NULL CORE,
+            // so "NULL CORE removes Wet's Mid component" still applies to the
+            // combined signal as one thing, rather than needing special-
+            // casing for a term that is already Side-only (and so already
+            // mono-safe: L + R of a pure Side signal is 0 by construction).
+            wetL += bedL;
+            wetR += bedR;
+
+            // Bass Anchor's low band: added directly, undelayed and
+            // unpanned, preserving whatever L/R (or M/S) balance it already
+            // had in the input - it never enters the orbit, so it can't be
+            // smeared by strand panning/delay. Deliberately not guaranteed
+            // mono-safe the way the Stereo Preserve bed is: it is exactly as
+            // mono-compatible as the input's own bass was, nothing more or
+            // less (see docs/commercial-upgrade/decisions/ADR-005-bass-anchor.md).
+            wetL += lowL;
+            wetR += lowR;
 
             const auto nulled = nullCoreProcess (wetL, wetR);
             wetL += (nulled.left  - wetL) * nullCoreAmount;
@@ -345,17 +533,101 @@ namespace dnaorbit::dsp
             // NULL CORE is deliberately NOT compensated: that mode is meant to be able
             // to almost vanish in mono, and for near-mono material the required boost
             // would be unbounded. The clamp above is the safety net.
+            //
+            // This formula only ever assumed Strand A/B/Core were coherent
+            // copies of the SAME source at different delays - which, since
+            // both strands and Core are always fed from Mid (see the Stereo
+            // Preserve comment above), remains exactly true for any
+            // stereoPreserve value, not just 0. The Stereo Preserve bed
+            // (bedL/bedR) and the Bass Anchor low band (lowL/lowR) are
+            // deliberately NOT included in this prediction: their power
+            // relative to Mid's depends on the input's actual Mid/Side
+            // energy ratio and low-frequency content respectively, neither
+            // of which this formula can know without becoming signal-
+            // adaptive (and risking the pumping this deterministic design
+            // exists to avoid) - see ADR-004 and ADR-005.
             const float wetMakeup = 1.0f + (makeupTarget - 1.0f) * autoGainAmount;
             wetL *= wetMakeup;
             wetR *= wetMakeup;
 
+            // --- Correlation-aware Mix Law ---------------------------------------------
+            // The equal-power Dry/Wet law below is calibrated for UNCORRELATED
+            // Dry/Wet: gD^2 + gW^2 == 1 always, so two uncorrelated unit-power
+            // signals blended by it sum to unit power at every Mix setting.
+            // When Dry and Wet are actually correlated (e.g. high Core, low
+            // Radius/Depth - Wet resembles Dry), the same law lets them add
+            // partially in AMPLITUDE instead of power, which is louder than
+            // unit power - audible as a loudness bump around Mix 50% that
+            // grows with how correlated Dry and Wet are. Slowly tracking that
+            // correlation and cancelling exactly the resulting power error
+            // removes the bump without touching Mix 0% or 100% (see the
+            // derivation below).
+            const float dryPowInst = dryL * dryL + dryR * dryR;
+            const float wetPowInst = wetL * wetL + wetR * wetR;
+            const float crossInst  = dryL * wetL + dryR * wetR;
+
+            corrDryPowState = dryPowInst + corrCoefficient * (corrDryPowState - dryPowInst);
+            corrWetPowState = wetPowInst + corrCoefficient * (corrWetPowState - wetPowInst);
+            corrCrossState  = crossInst  + corrCoefficient * (corrCrossState  - crossInst);
+
+            const float corrDenom = std::sqrt (std::max (corrDryPowState * corrWetPowState, 0.0f));
+            // Undefined when either side is silent - 0 (uncorrelated) is the
+            // safe fallback: predictedPower below reduces to gD^2 + gW^2 == 1,
+            // i.e. exactly the existing equal-power law, so this feature is a
+            // no-op whenever there is nothing (yet) to estimate a correlation from.
+            const float rho = corrDenom > 1.0e-9f
+                             ? std::clamp (corrCrossState / corrDenom, -1.0f, 1.0f)
+                             : 0.0f;
+
             // --- Dry/Wet mix, output gain ---------------------------------------------
             const auto dryWet = equalPowerMix (mix);
-            float finalL = dryWet.dry * dryL + dryWet.wet * wetL;
-            float finalR = dryWet.dry * dryR + dryWet.wet * wetR;
+
+            // predictedPower == 1 whenever gD == 0 or gW == 0, i.e. at Mix
+            // 0% or 100% - so this correction is exactly a no-op at both
+            // extremes, regardless of rho, which is what keeps "Mix 0% ==
+            // Dry" and the NULL CORE / mono-cancellation invariants exact.
+            const float predictedPower = dryWet.dry * dryWet.dry + dryWet.wet * dryWet.wet
+                                        + 2.0f * rho * dryWet.dry * dryWet.wet;
+            const float maxMixLawGain = dbToGain (maxMixLawCorrectionDb);
+            const float mixLawNormalizer = predictedPower > 1.0e-9f
+                                          ? std::clamp (1.0f / std::sqrt (predictedPower),
+                                                        1.0f / maxMixLawGain, maxMixLawGain)
+                                          : 1.0f;
+            // Gated by the same Auto Gain toggle as the Wet makeup above - one
+            // "keep loudness consistent" switch from the user's perspective,
+            // rather than a second parameter (see Parameters.h §13 guidance
+            // against proliferating IDs).
+            const float mixLawGain = 1.0f + (mixLawNormalizer - 1.0f) * autoGainAmount;
+
+            float finalL = mixLawGain * (dryWet.dry * dryL + dryWet.wet * wetL);
+            float finalR = mixLawGain * (dryWet.dry * dryR + dryWet.wet * wetR);
 
             finalL *= outGain;
             finalR *= outGain;
+
+            // --- Soft Bypass: crossfade the finished signal to dry ------------
+            // Deliberately the very last step, after output trim, so the
+            // fully-bypassed output is exactly the sanitized input (dryL/
+            // dryR), independent of Output/Mix/anything else - the same
+            // "Bypass means input==output" contract as the host's own
+            // Bypass (ADR-001), but reachable from inside the plugin and
+            // ramped (softBypassSmoothed, ~30ms) instead of instant. Nothing
+            // upstream of this point ever branches on softBypassAmt, so the
+            // orbit phase, filters, and smoothers keep running normally
+            // underneath a Soft Bypass exactly like ADR-001's host-Bypass
+            // scratch path - see ADR-008.
+            finalL += (dryL - finalL) * softBypassAmt;
+            finalR += (dryR - finalR) * softBypassAmt;
+
+            // --- Mono Preview: fold the finished output down to mono -----------
+            // Deliberately after Soft Bypass, not before, so Mono Preview
+            // previews whatever is actually being heard right now (the
+            // processed signal, or Dry if also bypassed) rather than always
+            // previewing the processed signal regardless of Bypass state.
+            // A monitoring utility only - see ADR-009.
+            const float monoSum = 0.5f * (finalL + finalR);
+            finalL += (monoSum - finalL) * monoPreviewAmt;
+            finalR += (monoSum - finalR) * monoPreviewAmt;
 
             constexpr float antiDenormal = 1.0e-20f;
             finalL += antiDenormal; finalL -= antiDenormal;

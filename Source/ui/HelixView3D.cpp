@@ -309,7 +309,7 @@ namespace dnaorbit::ui
 
                 const double meanZ = 0.5 * (p0.viewZ + p1.viewZ);
                 const int bucket = juce::jlimit (0, numBuckets - 1,
-                                                 (int) (Projection3D::depth01 (meanZ) * (numBuckets - 1) + 0.5));
+                                                 juce::roundToInt (Projection3D::depth01 (meanZ) * (numBuckets - 1)));
 
                 auto& path = target[(size_t) bucket];
                 path.startNewSubPath (p0.screen + w0);
@@ -339,7 +339,7 @@ namespace dnaorbit::ui
 
             const double meanZ = 0.5 * (a.viewZ + b.viewZ);
             const int bucket = juce::jlimit (0, numBuckets - 1,
-                                             (int) (Projection3D::depth01 (meanZ) * (numBuckets - 1) + 0.5));
+                                             juce::roundToInt (Projection3D::depth01 (meanZ) * (numBuckets - 1)));
 
             auto& path = rungPaths[(size_t) bucket];
             path.startNewSubPath (a.screen + normal);

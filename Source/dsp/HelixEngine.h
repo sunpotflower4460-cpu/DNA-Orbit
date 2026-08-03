@@ -7,6 +7,7 @@
 #include "OrbitMath.h"
 #include "OnePoleLowPass.h"
 #include "StereoUtilities.h"
+#include "CrossoverFilter.h"
 
 namespace dnaorbit::dsp
 {
@@ -36,6 +37,113 @@ namespace dnaorbit::dsp
             float mix01      = 0.35f;
             float outputDb   = 0.0f;
             bool  autoGain   = true;
+
+            /**
+             * 0 = Wet is built purely from Mid (the schema-1 behaviour:
+             * anti-phase stereo input collapses Wet to silence, wide stereo
+             * loses its L/R identity). At 0 < p <= 1, the two strands and
+             * Core stay fed from Mid ONLY - so the orbit's energy is always
+             * exactly balanced between Strand A and Strand B, regardless of
+             * how asymmetric the input is between L and R - while the
+             * input's Side content is added back as a separate, non-orbiting
+             * "Stereo Preserve Bed" term at amount p (see process() and
+             * docs/commercial-upgrade/decisions/ADR-004-stereo-preserve-bed.md).
+             * This is a deliberate redesign from an earlier version that fed
+             * L into Strand A and R into Strand B directly: that version
+             * geometrically kept the two strands antipodal, but an
+             * asymmetric input (e.g. L-only) made one strand's *energy*
+             * dominate the other's, so the perceptual centre drifted toward
+             * whichever strand carried more signal even though their
+             * *positions* stayed exactly opposite. Feeding both strands from
+             * Mid removes that failure mode entirely, by construction.
+             *
+             * Defaults to 0 here - the schema-1-compatible, source-
+             * independent default - so any caller that forgets to set it
+             * explicitly gets the old behaviour rather than a silent change;
+             * the actual product default lives in Parameters.h and is
+             * applied by PluginProcessor.
+             */
+            float stereoPreserve01 = 0.0f;
+
+            /**
+             * Linkwitz-Riley crossover point in Hz splitting input into a
+             * low band (kept as a direct, non-orbiting, stereo-image-
+             * preserving anchor) and a high band (which alone feeds the
+             * strands/Core/Stereo-Preserve-bed). At the range minimum
+             * (20Hz) the crossover is fully bypassed in the DSP - not just a
+             * near-zero split - which is what makes 20Hz both the "Off"
+             * display and the exact schema-2-and-earlier-compatible value.
+             * Defaults to 20Hz (bypassed) here for the same reason
+             * stereoPreserve01 defaults to 0 - the actual product default
+             * lives in Parameters.h and is applied by PluginProcessor.
+             */
+            float bassAnchorHz = 20.0f;
+
+            /**
+             * 0 = Natural, 1 = Vivid, 2 = Deep. Scales the back-position
+             * attenuation/cutoff/delay together (see applyParameters()).
+             * Natural (the default here and the product default) reproduces
+             * the fixed constants this engine always used before Character
+             * existed exactly, so introducing this parameter changes no
+             * existing project's sound - see
+             * docs/commercial-upgrade/decisions/ADR-006-character.md for why
+             * this deliberately does not match the spec's own suggested
+             * absolute numbers for "Natural".
+             */
+            int character = 0;
+
+            /**
+             * 0 = Free (this engine's original continuous, rate-integrated
+             * phase - no PPQ dependency, no retrigger; the default, and the
+             * only mode that existed before this parameter did, so it needed
+             * no schema bump). 1 = Retrigger (resets to startPhaseDeg only
+             * when hostIsPlaying transitions false -> true). 2 = Host Lock
+             * (phase tracks the host's PPQ position directly, converging
+             * over ~30ms rather than snapping, so ordinary per-block drift
+             * and genuine transport jumps - loops, scrubs - are both handled
+             * by the same mechanism). See process() and
+             * docs/commercial-upgrade/decisions/ADR-007-host-phase-lock.md.
+             */
+            int phaseMode = 0;
+
+            /** Degrees; used by Retrigger and Host Lock only. */
+            float startPhaseDeg = 0.0f;
+
+            /** True = clockwise (this engine's original, positive-increment direction). */
+            bool clockwise = true;
+
+            /**
+             * Beats per full orbit cycle for Host Lock, already resolved
+             * from Sync Division and the host's time signature (quarter
+             * notes per bar) by PluginProcessor - HelixEngine stays free of
+             * APVTS/parameter-ID concerns, so it takes a plain beat count
+             * rather than a division index.
+             */
+            double hostCycleBeats = 4.0;
+
+            /** Host transport's current PPQ position (block start), for Host Lock. */
+            double hostPpqPosition = 0.0;
+
+            /** Host transport play state, for Retrigger and Host Lock. */
+            bool hostIsPlaying = false;
+
+            /**
+             * In-plugin Soft Bypass, independent of the host's own Bypass.
+             * false (default) is this engine's normal processing - no
+             * schema bump needed. When true, process() still runs the full
+             * effect chain every block (nothing freezes) and crossfades the
+             * final output to the dry input over ~30ms; see
+             * softBypassSmoothed and ADR-008.
+             */
+            bool softBypass = false;
+
+            /**
+             * Monitoring-only: folds the finished output (applied after
+             * Soft Bypass, so it previews whatever is actually being heard)
+             * down to mono. false (default) leaves output untouched - no
+             * schema bump needed. See monoPreviewSmoothed and ADR-009.
+             */
+            bool monoPreview = false;
         };
 
         void prepare (double newSampleRate, int maximumBlockSize, int maxChannelsHint);
@@ -121,6 +229,10 @@ namespace dnaorbit::dsp
         static constexpr double phaseModulus = orbitmath::twoPi * 4096.0;
         bool   symmetryLocked = true;
 
+        /** Host Phase Lock: Retrigger detects the false->true edge of this. */
+        bool wasHostPlaying = false;
+        static constexpr double hostLockCorrectionTimeConstantSeconds = 0.03; // within the 20-50ms spec window
+
         // Fixed-duration linear resync ramp used when Symmetry returns to 100%
         // (see process()). Bounded and deterministic, unlike an exponential
         // tail, so it reliably completes within resyncDurationSeconds.
@@ -139,8 +251,51 @@ namespace dnaorbit::dsp
         juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> nullCoreMixSmoothed;
         juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> rateHzSmoothed;
         juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> autoGainAmountSmoothed;
+        juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> stereoPreserveSmoothed;
+        /** 0 = normal processing, 1 = fully crossfaded to dry. ~30ms ramp. */
+        juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> softBypassSmoothed;
+        /** 0 = normal stereo, 1 = fully folded to mono. ~30ms ramp. */
+        juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> monoPreviewSmoothed;
 
         bool  nullCoreTarget = false;
+
+        /**
+         * Slow (~200ms) running estimate of Dry/Wet correlation, used by the
+         * correlation-aware Mix Law (see process()) to cancel the loudness
+         * bump that an equal-power Dry/Wet blend produces when Dry and Wet
+         * are substantially correlated (e.g. Core-heavy, low-Radius/Depth
+         * settings where Wet resembles Dry). A single one-pole time constant
+         * rather than the spec's separate attack/release: correlation is a
+         * statistical estimate, not a transient envelope to catch fast and
+         * release slowly, and a single conservative constant is simpler and
+         * already avoids pumping (see corrCoefficient in prepare()).
+         */
+        float corrDryPowState = 0.0f;
+        float corrWetPowState = 0.0f;
+        float corrCrossState = 0.0f;
+        float corrCoefficient = 0.0f;
+        static constexpr double correlationTimeConstantSeconds = 0.2;
+        static constexpr float  maxMixLawCorrectionDb = 3.0f; // +/-3dB, per spec
+
+        // Bass Anchor: one crossover per input channel. Coefficients are
+        // recomputed at most once per block (see applyParameters()), not
+        // per-sample - a Butterworth biquad coefficient recalculation is
+        // heavy enough that doing it every sample would be wasteful for a
+        // parameter nobody automates at audio rate (see the CPU-optimization
+        // guidance to move filter-coefficient updates to control rate).
+        LinkwitzRileyCrossover bassAnchorL, bassAnchorR;
+        bool  bassAnchorBypassed = true;
+
+        // Host Phase Lock: read once per block in applyParameters(), like
+        // Bass Anchor and Character - none of these need per-sample
+        // smoothing (phaseMode is a discrete switch; the host-lock
+        // correction below already converges smoothly on its own).
+        int    currentPhaseMode = 0;
+        float  currentStartPhaseDeg = 0.0f;
+        bool   currentClockwise = true;
+        double currentHostCycleBeats = 4.0;
+        double currentHostPpqPosition = 0.0;
+        bool   currentHostIsPlaying = false;
 
         // Per-strand processing chains.
         OnePoleLowPass lowPassA, lowPassB;
@@ -149,14 +304,25 @@ namespace dnaorbit::dsp
         float maxDelaySamplesStored = 0.0f;
 
         static constexpr float strandGain       = 0.5f;
-        static constexpr float maxBackAttenDb    = 4.0f;
         static constexpr float frontCutoffHz     = 19000.0f;
-        static constexpr float backCutoffHz      = 5000.0f;
-        static constexpr float maxBackDelayMs    = 8.0f;
         static constexpr double maxRateDifference = 0.03;
         static constexpr double symmetryLockThreshold = 0.999;
         static constexpr double resyncDurationSeconds = 0.2; // within the 100-300ms spec window
         static constexpr float  maxWetMakeupGain = 4.0f;     // +12 dB ceiling
+
+        /**
+         * Character (Natural/Vivid/Deep) scales these three together, once
+         * per block in applyParameters() - not per-sample, matching the
+         * Bass Anchor precedent for anything that isn't a plain gain/time
+         * SmoothedValue. The Natural values are exactly this engine's fixed
+         * constants from before Character existed, so the default
+         * reproduces every existing project's sound unchanged; Vivid/Deep
+         * are progressively more coloured from there. See
+         * docs/commercial-upgrade/decisions/ADR-006-character.md.
+         */
+        float maxBackAttenDb = 4.0f;
+        float backCutoffHz   = 5000.0f;
+        float maxBackDelayMs = 8.0f;
 
         // Published for the UI thread; written once per block.
         std::atomic<float> uiThetaA { 0.0f };
