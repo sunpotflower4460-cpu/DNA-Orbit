@@ -163,6 +163,21 @@ silencing Wet, Mix-sweep RMS deviation bounds) for actually listening.
   signal to revisit ADR-005's optimizations one at a time, each verified
   against `Tests/BaselineRegressionTests.cpp` before/after.
 
+  **Spec §11.3's numeric targets cannot be evaluated here, in either
+  direction.** They are: under 0.5% realtime at 48kHz/64 samples with one
+  instance and the editor closed, under a 1% delta with the editor open,
+  stable at 10 instances, no dropouts at 192kHz. `Tools/BenchmarkDSP.cpp`
+  now exists and covers those configurations, but this container is shared
+  and virtualised with no fixed clock — the same build measured 260 and 448
+  ns/sample/instance in one session depending only on what else was
+  compiling at the time. So the figures it prints here neither demonstrate
+  the target is met nor that it is missed; they are not evidence either way.
+  What the tool does give is the thing §11.3 actually asks for
+  ("絶対数値は実機依存のため…前版比の回帰検出を重視する"): run it before and
+  after a change on one machine in one sitting, and the ratio is meaningful.
+  The absolute targets need a quiet, real machine, with the editor-open
+  delta measured in an actual host.
+
 - **Character (Natural/Vivid/Deep) intensity and quality** (see
   `docs/commercial-upgrade/decisions/ADR-006-character.md`): Vivid/Deep's
   attenuation/cutoff/delay numbers are new values chosen to progress

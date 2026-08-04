@@ -554,7 +554,10 @@ built-in `UnitTest` framework:
   centroid bias, rate-difference beat-cycle behaviour, equal-power pan
   unity-power check, front/back mapping.
 - **HelixEngine** — silence-in sanity at parameter extremes, impulse-response
-  finiteness, all 5 required sample rates × all 9 required block sizes,
+  finiteness, all 5 required sample rates × 12 block sizes (including 1, 2
+  and 3 — hosts hand out one-sample buffers when splitting a block around a
+  sample-accurate automation point, which is where anything computed once
+  per block is most exposed),
   all-parameters-at-extremes stress test, long-run Symmetry-100% centroid
   stability (angles stay wrapped, centroid stays locked), parameter-jump
   click bound, Mix 0% == Dry, NULL CORE + Mix 100% mono cancellation, NULL
@@ -720,8 +723,14 @@ cmake --build build --config Release -j --target DNAOrbitRenderShots
 ./build/DNAOrbitRenderShots <output-directory>
 ```
 
-It writes a locked shot, a detail-tab shot, two drift shots and a NULL CORE
-shot. Off by default (`DNA_ORBIT_BUILD_TOOLS=OFF`).
+It writes eight shots: a locked shot, a detail-tab shot, two drift shots, a
+NULL CORE shot, a Sync-without-host-tempo shot (the only way to see the
+inert-Rate warning in a headless environment), and the Detail tab rendered
+at both the minimum (780x540) and maximum (1600x1100) window sizes. The last
+two exist because a label that fits at the default 900px can still be
+clipped to an ellipsis at the minimum — which is exactly how the top bar's
+toggle labels were found to be disappearing (ADR-014). Off by default
+(`DNA_ORBIT_BUILD_TOOLS=OFF`).
 
 ### Other developer tools
 

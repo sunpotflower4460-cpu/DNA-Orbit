@@ -87,7 +87,16 @@ namespace
             beginTest ("Runs cleanly across supported sample rates and block sizes");
             {
                 const double sampleRates[] = { 44100.0, 48000.0, 88200.0, 96000.0, 192000.0 };
-                const int blockSizes[] = { 16, 32, 64, 128, 256, 512, 1024, 2048, 4096 };
+                // 1, 2 and 3 matter as much as the powers of two: the DSP
+                // spec asks for "block size 1 or the minimum supported,
+                // through 4096", and hosts genuinely do hand out one-sample
+                // buffers when splitting a block around a sample-accurate
+                // automation point. Anything computed once per block (the
+                // Host Lock phase correction, the control-rate Character
+                // and Bass Anchor updates) is at its most exposed there,
+                // and an odd size like 3 also catches loops that quietly
+                // assume an even count.
+                const int blockSizes[] = { 1, 2, 3, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096 };
 
                 for (double sr : sampleRates)
                 {
