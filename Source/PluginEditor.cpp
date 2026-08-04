@@ -116,6 +116,9 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
     setUpKnob (stereoPreserveKnob, params::stereoPreserveID, jp("ステレオ保持"), jp("左右の情報量"),
                jp("エフェクト音に元のステレオ感をどれだけ残すかです。0%は中央成分のみ、")
                + jp("100%で元の左右の広がりがそのまま加わります。逆位相の素材でも音が消えにくくなります。"));
+    setUpKnob (startPhaseKnob, params::startPhaseID, jp("開始位相"), jp("回り始める角度"),
+               jp("リトリガー時に戻る角度、およびホスト同期時の位相の基準点です。")
+               + jp("位相モードがフリーのときは音に影響しません。"));
     setUpKnob (bassAnchorKnob, params::bassAnchorHzID, jp("低音アンカー"), jp("低域を安定させる"),
                jp("設定した周波数より下の低音は軌道に乗らず、元の定位のまま真っ直ぐ残ります。")
                + jp("Offで無効。キックやベースの中心が動いて不安定に感じるときに上げてください。"));
@@ -194,6 +197,12 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
     statusLabel.setJustificationType (juce::Justification::centred);
     addAndMakeVisible (statusLabel);
 
+    transportStatusLabel.setFont (japaneseFont (10.5f));
+    transportStatusLabel.setJustificationType (juce::Justification::centred);
+    transportStatusLabel.setColour (juce::Label::textColourId,
+                                    dnaorbit::ui::DnaLookAndFeel::textColour().withAlpha (0.75f));
+    addAndMakeVisible (transportStatusLabel);
+
     warningLabel.setText (jp("NULL CORE — モノラルで消える可能性があります"), juce::dontSendNotification);
     warningLabel.setFont (japaneseFont (12.0f, true));
     warningLabel.setColour (juce::Label::textColourId, dnaorbit::ui::DnaLookAndFeel::warningColour());
@@ -207,7 +216,24 @@ DNAOrbitAudioProcessorEditor::DNAOrbitAudioProcessorEditor (DNAOrbitAudioProcess
     {
         nullCoreWatcher = std::make_unique<juce::ParameterAttachment> (
             *nullCoreParam,
-            [this] (float value) { warningLabel.setVisible (value > 0.5f); },
+            [this] (float value)
+            {
+                const bool on = value > 0.5f;
+                warningLabel.setVisible (on);
+
+                // Same principle as the Rate knob under an active Sync
+                // (ADR-014): NULL CORE removes exactly the Mid content the
+                // Core knob adds, so Core goes completely inert while it is
+                // on. The README already documented that as expected
+                // behaviour; leaving the knob looking live was the gap.
+                coreKnob.slider.setAlpha (on ? 0.45f : 1.0f);
+                coreKnob.hintLabel.setText (on ? jp("NULL CORE中は無効") : jp("中央に残す音"),
+                                             juce::dontSendNotification);
+                coreKnob.hintLabel.setColour (juce::Label::textColourId,
+                                               on
+                                                   ? dnaorbit::ui::DnaLookAndFeel::warningColour()
+                                                   : dnaorbit::ui::DnaLookAndFeel::textColour().withAlpha (0.55f));
+            },
             nullptr);
         nullCoreWatcher->sendInitialUpdate();
     }
@@ -283,7 +309,8 @@ void DNAOrbitAudioProcessorEditor::showPage (int page)
         knob->hintLabel.setVisible (basic);
     }
 
-    for (auto* knob : { &symmetryKnob, &twistKnob, &coreKnob, &outputKnob, &stereoPreserveKnob, &bassAnchorKnob })
+    for (auto* knob : { &symmetryKnob, &twistKnob, &coreKnob, &outputKnob, &stereoPreserveKnob,
+                        &bassAnchorKnob, &startPhaseKnob })
     {
         knob->slider.setVisible (! basic);
         knob->nameLabel.setVisible (! basic);
@@ -357,6 +384,69 @@ void DNAOrbitAudioProcessorEditor::timerCallback()
          << "相関  " << juce::String (helixView.getCorrelation(), 2);
 
     readoutLabel.setText (text, juce::dontSendNotification);
+
+    // --- What is actually driving the orbit (spec 03 §3.1 / §3.4) ----------
+    // The Rate knob is completely ignored while Sync is on and the host
+    // supplies a tempo, so saying so is not decoration: without it the user
+    // turns 速さ, hears nothing change, and has no way to know why.
+    const auto rateSource = processorRef.getRateSourceForUi();
+    juce::String transportText;
+    auto transportColour = dnaorbit::ui::DnaLookAndFeel::textColour().withAlpha (0.75f);
+
+    switch (rateSource)
+    {
+        case DNAOrbitAudioProcessor::RateSource::syncedToHost:
+            transportText = jp("テンポ同期中 — 速さは分割が決めています");
+            transportColour = dnaorbit::ui::DnaLookAndFeel::strandAColour();
+            break;
+        case DNAOrbitAudioProcessor::RateSource::syncFallbackNoTempo:
+            // Sync is on but inert: showing a plain "SYNC" here would be a
+            // lie, since the orbit is free-running off the Rate knob.
+            transportText = jp("テンポ同期ON — ホストのテンポ不明のため「速さ」で動作中");
+            transportColour = dnaorbit::ui::DnaLookAndFeel::warningColour();
+            break;
+        case DNAOrbitAudioProcessor::RateSource::freeRunning:
+        default:
+            transportText = {};
+            break;
+    }
+
+    // Host Lock state chip, appended to the same line.
+    const int phaseMode = phaseModeBox.getSelectedItemIndex();
+    if (phaseMode == 2) // Host Lock
+    {
+        const auto lockText = processorRef.isHostPlayingForUi()
+                            ? jp("ホスト同期: 曲位置にロック中")
+                            : jp("ホスト同期: 再生待ち");
+        transportText = transportText.isEmpty() ? lockText : transportText + jp(" / ") + lockText;
+    }
+    else if (phaseMode == 1) // Retrigger
+    {
+        const auto retrigText = jp("リトリガー: 再生開始で開始位相へ");
+        transportText = transportText.isEmpty() ? retrigText : transportText + jp(" / ") + retrigText;
+    }
+
+    transportStatusLabel.setText (transportText, juce::dontSendNotification);
+    transportStatusLabel.setColour (juce::Label::textColourId, transportColour);
+
+    // Mirror the same fact onto the Rate knob's own hint, so it is visible
+    // on the Basic tab where the knob actually lives. Only rewritten on an
+    // actual state change - setText on every tick would re-lay-out glyphs
+    // 12 times a second for nothing.
+    const int rateSourceIndex = static_cast<int> (rateSource);
+    if (rateSourceIndex != lastRateSourceShown)
+    {
+        lastRateSourceShown = rateSourceIndex;
+
+        const bool rateIsInert = rateSource == DNAOrbitAudioProcessor::RateSource::syncedToHost;
+        rateKnob.hintLabel.setText (rateIsInert ? jp("テンポ同期中は無効") : jp("1周する時間"),
+                                     juce::dontSendNotification);
+        rateKnob.hintLabel.setColour (juce::Label::textColourId,
+                                       rateIsInert
+                                           ? dnaorbit::ui::DnaLookAndFeel::warningColour()
+                                           : dnaorbit::ui::DnaLookAndFeel::textColour().withAlpha (0.55f));
+        rateKnob.slider.setAlpha (rateIsInert ? 0.45f : 1.0f);
+    }
 
     // Modified/Revert: once anything drifts from the picked preset's stored
     // values, offer to snap back to it. Cheap enough to just recompute on
@@ -467,7 +557,8 @@ void DNAOrbitAudioProcessorEditor::resized()
         directionBox.setBounds (phaseRow.removeFromRight (54));
         phaseModeBox.setBounds (phaseRow);
 
-        layOutKnobRow (controlArea, { &symmetryKnob, &twistKnob, &coreKnob, &outputKnob, &stereoPreserveKnob, &bassAnchorKnob });
+        layOutKnobRow (controlArea, { &symmetryKnob, &twistKnob, &coreKnob, &outputKnob,
+                                       &stereoPreserveKnob, &bassAnchorKnob, &startPhaseKnob });
     }
 
     // --- Centre: readouts | 3D helix ------------------------------------------
@@ -479,5 +570,9 @@ void DNAOrbitAudioProcessorEditor::resized()
     readoutLabel.setBounds (readoutColumn.removeFromTop (90));
 
     warningLabel.setBounds (centreArea.removeFromBottom (20));
+    // Directly under the helix and spanning its full width: this line
+    // explains why the orbit is moving the way it is, so it belongs next to
+    // the motion itself rather than tucked into the narrow readout column.
+    transportStatusLabel.setBounds (centreArea.removeFromBottom (16));
     helixView.setBounds (centreArea.reduced (4));
 }

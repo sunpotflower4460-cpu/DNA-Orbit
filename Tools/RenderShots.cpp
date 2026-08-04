@@ -32,6 +32,10 @@ namespace
         float symmetry;
         float rateHz;
         bool  nullCore;
+        // Sync ON with no host playhead is the "Sync is on but inert"
+        // state: the editor must say the orbit is still running off the
+        // Rate knob rather than showing a bare SYNC badge (spec 03 3.1).
+        bool  sync;
         int   page;          // 0 = basic, 1 = detail
         double secondsToRun;
     };
@@ -49,6 +53,9 @@ namespace
         setParam (processor.apvts, dnaorbit::params::rateID, scenario.rateHz);
         if (auto* nullCore = processor.apvts.getParameter (dnaorbit::params::nullCoreID))
             nullCore->setValueNotifyingHost (scenario.nullCore ? 1.0f : 0.0f);
+
+        if (auto* sync = processor.apvts.getParameter (dnaorbit::params::syncID))
+            sync->setValueNotifyingHost (scenario.sync ? 1.0f : 0.0f);
 
         processor.apvts.state.getOrCreateChildWithName (dnaorbit::params::uiStateNodeID, nullptr)
             .setProperty (dnaorbit::params::editorPagePropertyID, scenario.page, nullptr);
@@ -126,11 +133,12 @@ int main (int argc, char** argv)
         stale.deleteFile();
 
     const Scenario scenarios[] = {
-        { "shot_basic_locked.png",  100.0f, 0.50f, false, 0, 3.0 },
-        { "shot_detail_locked.png", 100.0f, 0.50f, false, 1, 3.0 },
-        { "shot_drift_70.png",       70.0f, 2.00f, false, 0, 8.0 },
-        { "shot_drift_40.png",       40.0f, 2.00f, false, 0, 8.0 },
-        { "shot_nullcore.png",      100.0f, 0.50f, true,  1, 3.0 },
+        { "shot_basic_locked.png",  100.0f, 0.50f, false, false, 0, 3.0 },
+        { "shot_detail_locked.png", 100.0f, 0.50f, false, false, 1, 3.0 },
+        { "shot_drift_70.png",       70.0f, 2.00f, false, false, 0, 8.0 },
+        { "shot_drift_40.png",       40.0f, 2.00f, false, false, 0, 8.0 },
+        { "shot_nullcore.png",      100.0f, 0.50f, true,  false, 1, 3.0 },
+        { "shot_sync_no_tempo.png", 100.0f, 0.50f, false, true,  0, 3.0 },
     };
 
     bool allOk = true;

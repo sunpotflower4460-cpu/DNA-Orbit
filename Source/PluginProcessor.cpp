@@ -96,8 +96,20 @@ float DNAOrbitAudioProcessor::resolveRateHz() const noexcept
     const bool syncEnabled = syncParam != nullptr && syncParam->load() > 0.5f;
     const float freeRateHz = rateHzParam != nullptr ? rateHzParam->load() : dnaorbit::params::rateDefaultHz;
 
+    // Each return path below also records which source won, so the editor
+    // can say so rather than leaving an inert Rate knob looking live
+    // (spec 03 §3.1). Relaxed ordering is enough: this is display-only
+    // state with no happens-before relationship to anything else.
+    const auto publish = [this] (RateSource source)
+    {
+        uiRateSource.store (static_cast<int> (source), std::memory_order_relaxed);
+    };
+
     if (! syncEnabled)
+    {
+        publish (RateSource::freeRunning);
         return freeRateHz;
+    }
 
     if (auto* currentPlayHead = getPlayHead())
     {
@@ -108,13 +120,17 @@ float DNAOrbitAudioProcessor::resolveRateHz() const noexcept
                 if (*bpm > 0.0)
                 {
                     const int divisionIndex = divisionParam != nullptr ? (int) divisionParam->load() : 2;
+                    publish (RateSource::syncedToHost);
                     return (float) dnaorbit::params::syncedRateHz (*bpm, divisionIndex);
                 }
             }
         }
     }
 
-    // Host tempo unavailable: fall back safely to the Free Rate.
+    // Host tempo unavailable: fall back safely to the Free Rate. Sync is on
+    // but not doing anything, which the spec also wants shown rather than
+    // hidden - the user would otherwise see "SYNC" and hear free-running.
+    publish (RateSource::syncFallbackNoTempo);
     return freeRateHz;
 }
 
@@ -155,6 +171,9 @@ dnaorbit::dsp::HelixEngine::Parameters DNAOrbitAudioProcessor::currentParameterS
         if (const auto position = currentPlayHead->getPosition())
         {
             p.hostIsPlaying = position->getIsPlaying();
+            // Also published for the editor's Host Lock chip (spec §3.4):
+            // "LOCKED TO SONG" is only truthful while the transport runs.
+            uiHostPlaying.store (p.hostIsPlaying, std::memory_order_relaxed);
 
             if (const auto ppq = position->getPpqPosition())
                 p.hostPpqPosition = *ppq;

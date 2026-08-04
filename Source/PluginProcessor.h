@@ -71,6 +71,26 @@ public:
      */
     int getLoadedSchemaVersion() const noexcept { return loadedSchemaVersion; }
 
+    /**
+     * What is actually driving the orbit rate right now, for the editor to
+     * display. The UI/UX spec (03_UIUX再設計仕様書 §3.1) requires that a
+     * control which has stopped affecting the sound must not look like it
+     * still does: with Sync on and a host tempo available, the Rate
+     * parameter is ignored entirely in favour of BPM x Division, and
+     * without this the Rate knob would just silently do nothing.
+     *
+     * Published from the audio thread once per block and polled by the
+     * editor's timer, same as the engine's other UI atomics.
+     */
+    enum class RateSource { freeRunning, syncedToHost, syncFallbackNoTempo };
+    RateSource getRateSourceForUi() const noexcept
+    {
+        return static_cast<RateSource> (uiRateSource.load (std::memory_order_relaxed));
+    }
+
+    /** Host transport play state, for the Host Lock status chip (spec §3.4). */
+    bool isHostPlayingForUi() const noexcept { return uiHostPlaying.load (std::memory_order_relaxed); }
+
 private:
     dnaorbit::dsp::HelixEngine engine;
 
@@ -81,6 +101,15 @@ private:
      * touching the audible dry passthrough - see processBlockBypassed().
      */
     juce::AudioBuffer<float> bypassScratchBuffer;
+
+    // Written on the audio thread, read by the editor's timer. int rather
+    // than the enum itself so the atomic is unambiguously lock-free on
+    // every platform. mutable because they are published from
+    // resolveRateHz()/currentParameterSnapshot(), which are const: these
+    // are observational side effects, not part of the object's logical
+    // state, so const-ness of those queries is still the honest signature.
+    mutable std::atomic<int>  uiRateSource { 0 };
+    mutable std::atomic<bool> uiHostPlaying { false };
 
     std::atomic<float>* rateHzParam     = nullptr;
     std::atomic<float>* syncParam       = nullptr;

@@ -74,9 +74,20 @@ folds the output to mono for a quick mono-compatibility check. Both are
 always reachable and automatable regardless of host. See below.
 
 **詳細 (Detail)** — テンポ同期 + 分割, 対称性, ねじれ, 中心の芯, 出力,
-ステレオ保持, 低音アンカー, 音量自動補正, NULL CORE (marked in red), 音色
-(Character), and 位相/方向 (Phase Mode/Direction). Every control has a
-Japanese tooltip.
+ステレオ保持, 低音アンカー, 開始位相, 音量自動補正, NULL CORE (marked in
+red), 音色 (Character), and 位相/方向 (Phase Mode/Direction). Every control
+has a Japanese tooltip.
+
+A status line under the helix says what is actually driving the orbit right
+now. This is not decoration: with Sync on and a host tempo available, the
+Rate knob is **ignored entirely** in favour of BPM x Division, so without it
+you would turn 速さ, hear nothing change, and have no way to know why. The
+knob dims and its hint switches to 「テンポ同期中は無効」 in that state. If
+Sync is on but the host reports no tempo, the line says so in a warning
+colour rather than showing a bare "SYNC" badge — the orbit is genuinely
+free-running off the Rate knob then, and claiming otherwise would be a lie.
+The same line reports Host Lock state, and only says the phase is locked to
+the song while the transport is actually running. See ADR-014.
 
 ### The 3D visualiser
 
@@ -126,7 +137,7 @@ exceeds budget.
 | Bass Anchor | `bassAnchorHz` | 20 – 500 Hz (log-skewed) | 120 Hz, "Off" at 20 Hz (20 Hz for projects saved before this parameter existed) | Content below this frequency bypasses the orbit entirely and stays at its original stereo position. See below |
 | Character | `character` | Natural / Vivid / Deep | **Natural** | How strongly the back position is coloured (attenuation/cutoff/delay). Natural reproduces this plugin's original fixed sound exactly; Vivid and Deep darken and delay the back position progressively more |
 | Phase Mode | `phaseMode` | Free / Retrigger / Host Lock | **Free** | Free: unchanged continuous phase (no PPQ dependency). Retrigger: snaps to Start Phase the instant host playback starts. Host Lock: phase is continuously derived from the host's PPQ position. See below |
-| Start Phase | `startPhase` | 0 – 360° | 0° | The angle Retrigger snaps to, and the phase offset Host Lock's PPQ mapping is measured from. No dedicated knob yet (Detail tab) — automatable via the host's generic parameter list |
+| Start Phase | `startPhase` | 0 – 360° | 0° | The angle Retrigger snaps to, and the phase offset Host Lock's PPQ mapping is measured from. Has no audible effect while Phase Mode is Free |
 | Direction | `direction` | CW / CCW | **CW** | Rotation direction; also which way Host Lock's PPQ-derived phase advances |
 | Soft Bypass | `softBypass` | on/off | **off** | In-plugin Bypass, independent of the host's own Bypass. Crossfades the final output to Dry over ~30ms; the orbit/filters/smoothers keep running underneath it. See below |
 | Mono Preview | `monoPreview` | on/off | **off** | Monitoring-only: folds the final output down to mono over ~30ms, to check mono-compatibility. Applied after Soft Bypass, so it previews whatever is actually being heard. See below |

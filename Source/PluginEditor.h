@@ -76,7 +76,8 @@ private:
     Knob rateKnob, radiusKnob, depthKnob, mixKnob;
 
     // Detail page.
-    Knob symmetryKnob, twistKnob, coreKnob, outputKnob, stereoPreserveKnob, bassAnchorKnob;
+    Knob symmetryKnob, twistKnob, coreKnob, outputKnob, stereoPreserveKnob,
+         bassAnchorKnob, startPhaseKnob;
     juce::ToggleButton syncButton;
     juce::ComboBox divisionBox;
     juce::Label divisionLabel;
@@ -84,9 +85,6 @@ private:
     juce::ToggleButton nullCoreButton;
     juce::ComboBox characterBox;
     juce::Label characterLabel;
-    // Start Phase itself has no dedicated knob yet (deferred to Phase 5's UI
-    // pass); it remains fully controllable via the host's generic parameter
-    // list / automation in the meantime.
     juce::ComboBox phaseModeBox, directionBox;
     juce::Label phaseModeLabel;
 
@@ -96,6 +94,15 @@ private:
     // Live readouts, updated on a slow timer so 45 fps helix repaints never
     // trigger glyph re-layout.
     juce::Label readoutLabel, statusLabel, warningLabel;
+
+    // Shows what is actually driving the orbit right now - which rate source
+    // won, and the Host Lock state. Required by the UI/UX spec §3.1/§3.4 so
+    // that a control which has stopped affecting the sound (the Rate knob
+    // under an active Sync) cannot silently look like it still does.
+    juce::Label transportStatusLabel;
+    // Remembered so the Rate knob's hint is only rewritten when the state
+    // actually changes, rather than on every timer tick.
+    int lastRateSourceShown = -1;
 
     // Tracks the nullCore parameter itself, so the warning follows host
     // automation and preset loads rather than only UI clicks.
