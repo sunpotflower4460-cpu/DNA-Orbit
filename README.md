@@ -300,6 +300,16 @@ whatever is actually being heard right now — the processed signal
 normally, or the Dry signal if Soft Bypass is also engaged — rather than
 always previewing the processed signal regardless of Bypass state.
 
+Being last in the chain makes it the one control that deliberately breaks
+the otherwise-universal "Mix 0% + Output 0dB reproduces Dry exactly"
+invariant: at Mix 0% with Mono Preview engaged you hear the *mono fold-down
+of Dry*, which is precisely what a mono check is for. Every sound-shaping
+parameter still honours that invariant unconditionally.
+`Tests/MonoPreviewTests.cpp` asserts the exact expected fold rather than
+merely "differs from dry", so a future reordering that moved Mono Preview
+ahead of the Dry/Wet mix would fail rather than quietly change what the
+button previews.
+
 **Compatibility**: off (the default) is exactly this engine's normal
 processing — no state-schema bump was needed.
 
@@ -384,30 +394,60 @@ Switch Auto Gain off in the 詳細 tab to get the raw, uncompensated wet level.
 
 ## 5. Signal flow
 
+Order below matches `HelixEngine::process()` exactly, per sample.
+
 ```
-Input
-  +- Dry path (unchanged) --------------------------------------+
-  |                                                              |
-  +- Mid/Mono extraction                                        |
-       +- Strand A: orbit pos -> depth gain -> depth LPF ->      |
-       |            fractional delay -> equal-power pan   --+   |
-       +- Strand B: (+ twist delay) orbit pos -> depth gain ->   |
-                    depth LPF -> fractional delay -> pan   --+   |
-                                                              |   |
-                                                        Wet sum   |
-                                                          + Core  |
-                                                     [optional]   |
-                                                    NULL CORE     |
-                                                    (Wet only)    |
-                                                          |       |
-                                            Equal-power Dry/Wet mix
+Input (sanitised: a non-finite sample becomes silence)
+  |
+  +- Dry path (kept untouched) ----------------------------------------+
+  |                                                                     |
+  +- Bass Anchor: 4th-order Linkwitz-Riley split                       |
+       |    (at 20Hz/"Off" a dedicated branch skips this entirely,     |
+       |     so the orbit band is the raw input)                        |
+       |                                                                |
+       +- Low band ---------------------------------------------+      |
+       |                                                         |      |
+       +- Orbit band -> Mid = 0.5*(L+R),  Side = 0.5*(L-R)      |      |
+            |                                                    |      |
+            +- Strand A: Mid -> orbit pos -> depth gain ->        |      |
+            |            depth LPF -> fractional delay ->         |      |
+            |            equal-power pan ------------------+      |      |
+            +- Strand B: Mid -> (+ twist delay) -> same ---+      |      |
+            |                                              |      |      |
+            +- Core: Mid, centred ------------------------+       |      |
+            |                                              |      |      |
+            +- Stereo Preserve bed: +p*Side / -p*Side ----+       |      |
+               (non-orbiting; bedL + bedR == 0 identically)|      |      |
+                                                     Wet sum <---+      |
+                                                          |             |
+                                            [optional] NULL CORE        |
+                                                   (Wet only)           |
+                                                          |             |
+                                        Auto Gain wet makeup            |
+                                                          |             |
+                          Correlation-aware Dry/Wet mix <--------------+
+                        (equal-power law, corrected by the running
+                         Dry/Wet correlation; a no-op at Mix 0%/100%)
                                                           |
-                                                  Output gain -> Output
+                                                    Output gain
+                                                          |
+                                    [optional] Soft Bypass crossfade -> Dry
+                                                          |
+                                    [optional] Mono Preview fold-down
+                                                          |
+                                                       Output
 ```
 
-Stereo input uses `Mid = 0.5*(L+R)` as the source signal for both strands
-and the Core signal; Dry keeps the original L/R. Mono input uses the mono
-signal directly for both Dry and Wet.
+Both strands **and** Core are fed from `Mid` only, at any Stereo Preserve
+value — that is what keeps the two strands' energies equal by construction
+rather than on average, so the perceptually weighted centre cannot drift
+(ADR-004). Width comes back through the separate, non-orbiting bed instead.
+Dry always keeps the original L/R. Mono input has `Side == 0`, so the bed is
+silent and Stereo Preserve has no effect at all on a mono source.
+
+The last two stages are monitoring/utility rather than sound design, which
+is why they sit after Output gain: Soft Bypass crossfades the *finished*
+signal to Dry, and Mono Preview folds whatever is actually being heard.
 
 ## 6. Building on macOS
 
@@ -583,8 +623,16 @@ built-in `UnitTest` framework:
   Preview at all, that engaging it folds L/R to exactly equal within the
   30ms ramp and that disengaging it restores the stereo image, that it
   applies after Soft Bypass (both engaged together previews the mono-folded
-  Dry signal), and that the crossfade produces no audible sample-to-sample
-  jump.
+  Dry signal), that at Mix 0% it folds the *Dry* signal to the exact
+  expected mono sum (pinning the one deliberate exception to the "Mix 0% ==
+  Dry" invariant, so a reordering ahead of the Dry/Wet mix fails here), and
+  that the crossfade produces no audible sample-to-sample jump.
+- **TailLength** — measures how long the engine keeps producing output above
+  -60dBFS after its input goes silent, and asserts `getTailLengthSeconds()`
+  covers it, at 44.1/48/96/192kHz. Covers the real worst case — the lowest
+  *engaged* Bass Anchor crossover (21Hz; 20Hz takes the bypass branch), whose
+  4th-order ringing runs to ~73ms and was being under-reported as 50ms before
+  ADR-013.
 - **UndoRedo** — that `apvts` is wired to the processor's own UndoManager,
   that undoing/redoing a single parameter change works, that multiple
   changes grouped into one transaction undo/redo together (the mechanism

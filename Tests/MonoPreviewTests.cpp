@@ -159,6 +159,64 @@ namespace
                 }
             }
 
+            beginTest ("At Mix 0% Mono Preview folds the DRY signal - the 'Mix 0% == Dry' invariant is conditional on it being off");
+            {
+                // Pins a deliberate exception to an invariant stated
+                // elsewhere without qualification. "Mix 0% + Output 0dB
+                // reproduces Dry exactly" holds for every *sound-shaping*
+                // parameter, and the Bass Anchor / Character / Soft Bypass
+                // suites each assert it. Mono Preview is the one control
+                // that legitimately breaks it, because it is a monitoring
+                // utility applied to the finished output: at Mix 0% with it
+                // engaged you are meant to hear the mono fold-down of the
+                // dry signal, which is the whole point of a mono check.
+                //
+                // Asserting the exact expected value (rather than just
+                // "differs from dry") means a future reordering that moved
+                // Mono Preview before the Dry/Wet mix would fail here
+                // instead of silently changing what the button previews.
+                HelixEngine engine;
+                engine.prepare (sr, blockSize, 2);
+
+                HelixEngine::Parameters p;
+                p.mix01 = 0.0f;         // fully dry
+                p.outputDb = 0.0f;
+                p.monoPreview = true;
+                p.rateHz = 2.0f;
+                p.radius01 = 1.0f;
+                engine.primeParameters (p); // snap straight to fully engaged
+
+                juce::AudioBuffer<float> buffer (2, blockSize);
+                for (int n = 0; n < blockSize; ++n)
+                {
+                    // Deliberately asymmetric L/R, so a mono fold is
+                    // clearly distinguishable from a passthrough.
+                    buffer.setSample (0, n, 0.5f * (float) std::sin (juce::MathConstants<double>::twoPi * 220.0 * n / sr));
+                    buffer.setSample (1, n, 0.2f * (float) std::sin (juce::MathConstants<double>::twoPi * 330.0 * n / sr));
+                }
+                juce::AudioBuffer<float> dryCopy;
+                dryCopy.makeCopyOf (buffer);
+
+                engine.process (buffer, 2);
+
+                bool differsFromDry = false;
+                for (int n = 0; n < blockSize; ++n)
+                {
+                    const float expectedMono = 0.5f * (dryCopy.getSample (0, n) + dryCopy.getSample (1, n));
+                    expectWithinAbsoluteError (buffer.getSample (0, n), expectedMono, 1.0e-5f,
+                                                "Mix 0% + Mono Preview must output the mono fold of Dry");
+                    expectWithinAbsoluteError (buffer.getSample (1, n), expectedMono, 1.0e-5f,
+                                                "Mix 0% + Mono Preview must output the mono fold of Dry");
+
+                    if (std::abs (buffer.getSample (0, n) - dryCopy.getSample (0, n)) > 1.0e-4f)
+                        differsFromDry = true;
+                }
+
+                expect (differsFromDry,
+                        "Sanity: with asymmetric L/R the mono fold must actually differ from Dry, "
+                        "or this test would also pass on a plain passthrough");
+            }
+
             beginTest ("Mono Preview's crossfade produces no audible sample-to-sample jump while engaging");
             {
                 HelixEngine engine;
