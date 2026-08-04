@@ -225,6 +225,24 @@ silencing Wet, Mix-sweep RMS deviation bounds) for actually listening.
      confusing. If real usage shows confusion, the tooltip wording and/or
      button placement is the first thing to revisit.
 
+- **The "what is driving the orbit" status line, with a real host tempo**
+  (see `docs/commercial-upgrade/decisions/ADR-014-inert-control-visibility.md`):
+  the Rate knob is ignored entirely when Sync is on and the host supplies a
+  tempo, and the editor now says so (status line under the helix, plus the
+  knob dimming with its hint switched to 「テンポ同期中は無効」). The
+  *fallback* state — Sync on, host tempo unavailable — was verified visually
+  here, because this environment has no playhead and therefore always lands
+  in it (`Tools/RenderShots.cpp`'s `shot_sync_no_tempo` scenario). The
+  genuinely-synced state could not be: it needs a host actually reporting a
+  BPM. Check in a real DAW that:
+  1. With Sync on and the transport at a known tempo, the line reads
+     「テンポ同期中 — 速さは分割が決めています」 and the 速さ knob is dimmed.
+  2. The wording is actually clear to a user rather than merely accurate.
+  3. The line sitting directly under the helix does not visually crowd the
+     visualiser at small window sizes.
+  4. Host Lock's chip says 「曲位置にロック中」 only while the transport is
+     rolling, and 「再生待ち」 when stopped.
+
 - **Mono Preview real-ear check** (see
   `docs/commercial-upgrade/decisions/ADR-009-ui-ux-batch.md`): the mono
   fold-down math and its 30ms ramp are verified numerically in
