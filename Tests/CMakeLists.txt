@@ -17,6 +17,7 @@ add_executable(DNAOrbitTests
     CharacterTests.cpp
     HostPhaseLockTests.cpp
     SoftBypassTests.cpp
+    TailLengthTests.cpp
     MonoPreviewTests.cpp
     UndoRedoTests.cpp
     PresetIntensityTests.cpp
@@ -34,8 +35,8 @@ if (DNA_ORBIT_WARNINGS_AS_ERRORS AND NOT MSVC)
         LevelMatchTests.cpp GeometryTests.cpp BaselineRegressionTests.cpp
         PresetsTests.cpp StereoPreserveTests.cpp CrossoverFilterTests.cpp
         BassAnchorTests.cpp CharacterTests.cpp HostPhaseLockTests.cpp
-        SoftBypassTests.cpp MonoPreviewTests.cpp UndoRedoTests.cpp
-        PresetIntensityTests.cpp
+        SoftBypassTests.cpp TailLengthTests.cpp MonoPreviewTests.cpp
+        UndoRedoTests.cpp PresetIntensityTests.cpp
         PROPERTIES COMPILE_OPTIONS "-Werror")
 endif()
 

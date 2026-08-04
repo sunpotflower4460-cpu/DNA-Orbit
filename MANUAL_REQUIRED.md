@@ -57,6 +57,15 @@ those DAWs installed. This includes: scan, load, editor resize, presets,
 save/reopen project, automation, tempo change, loop, bypass, offline bounce,
 freeze, mono/stereo track routing, multiple instances, remove/reinsert.
 
+One offline-bounce case is worth checking specifically (see
+`docs/commercial-upgrade/decisions/ADR-013-tail-length.md`): bounce a clip
+with **Bass Anchor set near its 20Hz minimum** and confirm the tail is not
+truncated. That setting engages the lowest 4th-order Linkwitz-Riley
+crossover, whose ringing measures ~73ms — longer than the 50ms the plugin
+used to report to hosts. `getTailLengthSeconds()` is now 0.1 and
+`Tests/TailLengthTests.cpp` pins the measurement, but only a real host can
+confirm the host actually honours the declared tail.
+
 ## Manual listening
 
 `docs/commercial-upgrade/08_手動試聴_DAW検証仕様書.md` requires actual

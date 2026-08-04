@@ -28,7 +28,20 @@ public:
     bool acceptsMidi() const override { return false; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 0.05; }
+    /**
+     * How long the plugin keeps producing audible output after its input
+     * goes silent. Hosts use this to decide how long to keep pulling audio
+     * on an offline bounce or freeze, so under-reporting truncates the tail.
+     *
+     * 0.05 was correct for the original engine (max back-delay 8ms + max
+     * Twist 20ms), but Bass Anchor made it wrong: a 4th-order
+     * Linkwitz-Riley crossover just above the 20Hz "Off" threshold rings
+     * for 68-73ms, well past 50ms. Measured worst case across 44.1/48/96/
+     * 192kHz is pinned by Tests/TailLengthTests.cpp, which fails if a future
+     * change (a longer Character delay, a lower Bass Anchor minimum) pushes
+     * the real tail past what is declared here. See ADR-013.
+     */
+    double getTailLengthSeconds() const override { return 0.1; }
 
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
