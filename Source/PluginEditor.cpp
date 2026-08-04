@@ -500,28 +500,60 @@ void DNAOrbitAudioProcessorEditor::resized()
 
     // --- Top bar ---------------------------------------------------------------
     auto topBar = area.removeFromTop (44);
-    auto titleArea = topBar.removeFromLeft (220);
+
+    // Widths are allocated by how badly each element degrades when squeezed,
+    // not in reading order. The tab pair and the two utility toggles carry
+    // text that becomes meaningless when clipped - an unlabelled checkbox is
+    // useless - so they get fixed reservations first. The title is pure
+    // branding and shrinks; the preset area holds a combo box, which stays
+    // usable when narrow because its menu still opens at full width.
+    //
+    // Taking the fixed widths off the left in order (as this did before)
+    // left the toggles with whatever was over: 38px each at the 780px
+    // minimum window size, which clipped 「バイパス」/「モノ確認」 down to an
+    // ellipsis.
+    constexpr int tabAreaWidth    = 140;
+    constexpr int toggleAreaWidth = 184;  // two labelled toggles
+    constexpr int titleMaxWidth   = 220;
+    constexpr int titleMinWidth   = 140;
+    constexpr int presetMinWidth  = 200;
+
+    const int titleWidth = juce::jlimit (titleMinWidth, titleMaxWidth,
+                                          topBar.getWidth() - tabAreaWidth - toggleAreaWidth - presetMinWidth);
+
+    auto titleArea = topBar.removeFromLeft (titleWidth);
     titleLabel.setBounds (titleArea.removeFromTop (24));
     subtitleLabel.setBounds (titleArea);
 
-    auto tabArea = topBar.removeFromLeft (140).reduced (0, 8);
+    auto tabArea = topBar.removeFromLeft (tabAreaWidth).reduced (0, 8);
     basicTabButton.setBounds (tabArea.removeFromLeft (66));
     tabArea.removeFromLeft (4);
     detailTabButton.setBounds (tabArea.removeFromLeft (66));
 
-    auto presetArea = topBar.removeFromRight (320).reduced (0, 9);
-    revertButton.setBounds (presetArea.removeFromRight (58));
-    presetArea.removeFromRight (6);
-    presetLabel.setBounds (presetArea.removeFromLeft (74));
-    presetArea.removeFromLeft (6);
-    presetBox.setBounds (presetArea);
-
-    // Whatever remains of topBar (between the tabs and the preset menu) is
-    // the Soft Bypass / Mono Preview toggles - visible on both pages since
-    // they are top-level, always-relevant controls.
-    auto utilityArea = topBar.reduced (4, 9);
+    // Reserved before the preset area so the toggles can never be the ones
+    // that lose their labels.
+    auto utilityArea = topBar.removeFromLeft (juce::jmin (toggleAreaWidth, topBar.getWidth())).reduced (4, 9);
     bypassButton.setBounds (utilityArea.removeFromLeft (utilityArea.getWidth() / 2));
     monoPreviewButton.setBounds (utilityArea);
+
+    auto presetArea = topBar.reduced (0, 9);
+    if (presetArea.getWidth() > 0)
+    {
+        revertButton.setBounds (presetArea.removeFromRight (juce::jmin (58, presetArea.getWidth())));
+        presetArea.removeFromRight (6);
+        // The 「プリセット」 caption is the first thing to go when space runs
+        // out: the combo box below it already says what it is once opened,
+        // and an empty caption costs nothing, whereas a clipped combo box
+        // hides which preset is currently selected.
+        const bool showPresetCaption = presetArea.getWidth() > 200;
+        presetLabel.setVisible (currentPage == 0 && showPresetCaption);
+        if (showPresetCaption)
+        {
+            presetLabel.setBounds (presetArea.removeFromLeft (74));
+            presetArea.removeFromLeft (6);
+        }
+        presetBox.setBounds (presetArea);
+    }
 
     // --- Control area ----------------------------------------------------------
     auto controlArea = area.removeFromBottom (152).reduced (8);

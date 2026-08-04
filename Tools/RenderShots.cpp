@@ -38,6 +38,11 @@ namespace
         bool  sync;
         int   page;          // 0 = basic, 1 = detail
         double secondsToRun;
+        // Editor size to render at. The Detail tab now carries seven
+        // knobs, so the documented minimum (780x540) is the size where a
+        // layout regression would show up first.
+        int   width;
+        int   height;
     };
 
     /** Returns true on success, so callers can turn a write failure into a non-zero exit code. */
@@ -61,7 +66,7 @@ namespace
             .setProperty (dnaorbit::params::editorPagePropertyID, scenario.page, nullptr);
 
         std::unique_ptr<juce::AudioProcessorEditor> editor { processor.createEditor() };
-        editor->setSize (900, 620);
+        editor->setSize (scenario.width, scenario.height);
         editor->setVisible (true);
 
         juce::AudioBuffer<float> buffer (2, blockSize);
@@ -133,12 +138,16 @@ int main (int argc, char** argv)
         stale.deleteFile();
 
     const Scenario scenarios[] = {
-        { "shot_basic_locked.png",  100.0f, 0.50f, false, false, 0, 3.0 },
-        { "shot_detail_locked.png", 100.0f, 0.50f, false, false, 1, 3.0 },
-        { "shot_drift_70.png",       70.0f, 2.00f, false, false, 0, 8.0 },
-        { "shot_drift_40.png",       40.0f, 2.00f, false, false, 0, 8.0 },
-        { "shot_nullcore.png",      100.0f, 0.50f, true,  false, 1, 3.0 },
-        { "shot_sync_no_tempo.png", 100.0f, 0.50f, false, true,  0, 3.0 },
+        { "shot_basic_locked.png",  100.0f, 0.50f, false, false, 0, 3.0, 900, 620 },
+        { "shot_detail_locked.png", 100.0f, 0.50f, false, false, 1, 3.0, 900, 620 },
+        { "shot_drift_70.png",       70.0f, 2.00f, false, false, 0, 8.0, 900, 620 },
+        { "shot_drift_40.png",       40.0f, 2.00f, false, false, 0, 8.0, 900, 620 },
+        { "shot_nullcore.png",      100.0f, 0.50f, true,  false, 1, 3.0, 900, 620 },
+        { "shot_sync_no_tempo.png", 100.0f, 0.50f, false, true,  0, 3.0, 900, 620 },
+        // Minimum and maximum of setResizeLimits(), on the Detail tab
+        // where the control density is highest.
+        { "shot_detail_min.png",    100.0f, 0.50f, false, false, 1, 3.0, 780, 540 },
+        { "shot_detail_max.png",    100.0f, 0.50f, false, false, 1, 3.0, 1600, 1100 },
     };
 
     bool allOk = true;
