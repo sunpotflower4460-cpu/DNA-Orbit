@@ -737,8 +737,15 @@ toggle labels were found to be disappearing (ADR-014). Off by default
 All behind the same `-DDNA_ORBIT_BUILD_TOOLS=ON` flag, none shipped:
 
 - **`DNAOrbitRenderAudioSample`** — renders dry/wet WAV pairs of a
-  synthesized pad and a sustained vocal-ish tone through real factory
-  presets, so the effect can be listened to rather than only reasoned about.
+  synthesized pad, a vocal-ish tone, and a strummed guitar chord
+  (Karplus-Strong, so the pluck decays like a real string rather than
+  sounding like stacked sines), each through the factory preset built for
+  that material. Every source starts mono-centred, so all width and
+  movement in the wet file is the effect's. Clip lengths come from each
+  preset's revolution time — under about two full turns the motion reads as
+  a fixed off-centre image rather than as motion. Synthesized proxies, not
+  recordings: useful for hearing what the effect does to sustained versus
+  decaying material, not evidence about real tracks.
 - **`DNAOrbitPresetIntensityAnalysis`** — measures how audible a parameter
   set actually is (stereo width, pan movement, level vs. dry in stereo and
   mono), with per-parameter sweeps. This is what ADR-010's preset re-tuning
