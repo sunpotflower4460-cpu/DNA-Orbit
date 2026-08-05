@@ -1,8 +1,23 @@
 /**
- * Developer/demo tool: renders short WAV files of a synthesized source
- * (a pad and a sustained "vocal-ish" tone) both dry and processed through
- * the real HelixEngine using two factory presets, so the effect can
- * actually be listened to rather than only reasoned about from the code.
+ * Developer/demo tool: renders dry/wet WAV pairs of synthesized sources
+ * through real factory presets, so the effect can be listened to rather
+ * than only reasoned about from the code.
+ *
+ * Three sources, each matched to the preset built for that material: a
+ * sustained pad, a "vocal-ish" tone, and a strummed guitar chord. All
+ * three start mono-centred (L == R), so every bit of width and movement
+ * in the wet file is the effect's doing and nothing else.
+ *
+ * These are synthesized proxies, not recordings. They are useful for
+ * hearing what the effect *does* to a given kind of material - sustained
+ * versus decaying, harmonically simple versus dense - and useless as
+ * evidence about how the plugin sits in a real mix. Real-material
+ * listening stays on the MANUAL_REQUIRED.md list.
+ *
+ * Clip lengths are derived from each preset's own revolution time rather
+ * than picked round: below roughly two full revolutions the motion reads
+ * as a fixed off-centre image instead of as motion.
+ *
  * Not part of the shipped plugin - build with -DDNA_ORBIT_BUILD_TOOLS=ON.
  */
 
@@ -13,6 +28,7 @@
 #include <cmath>
 #include <cstdio>
 #include <memory>
+#include <vector>
 
 #include "Presets.h"
 #include "dsp/HelixEngine.h"
@@ -117,6 +133,97 @@ namespace
         }
     }
 
+    /**
+     * A strummed open-position E-minor chord, mono-centred.
+     *
+     * Uses Karplus-Strong rather than stacked sines: a plucked string's
+     * character is a noise burst filtered by its own round trip, and no
+     * amount of added harmonics reproduces that from sine tones. Each
+     * string is a delay line the length of one period, excited once with
+     * noise and then fed back through a two-point average, which is what
+     * produces the bright attack decaying to a mellow tail.
+     *
+     * Still a synthesised proxy, not a recording - it has no pick noise,
+     * no fret buzz, no amp or cabinet, and every strum is identical. It is
+     * good enough to hear what the *effect* does to a plucked, decaying,
+     * harmonically dense source; it is not evidence about how the plugin
+     * sits on a real guitar track.
+     */
+    void fillGuitar (juce::AudioBuffer<float>& buffer, double sampleRate)
+    {
+        const int numSamples = buffer.getNumSamples();
+        buffer.clear();
+
+        // Open Em: E2 B2 E3 G3 B3 E4 - the fullest-sounding standard shape.
+        const double stringHz[] = { 82.41, 123.47, 164.81, 196.00, 246.94, 329.63 };
+        constexpr int numStrings = 6;
+
+        // Strum every 3.5s, alternating down/up so the sample does not
+        // sound like one gesture looped.
+        const double strumTimes[] = { 0.15, 3.65, 7.15, 10.65, 14.15 };
+
+        auto* l = buffer.getWritePointer (0);
+        auto* r = buffer.getWritePointer (1);
+
+        juce::Random random { 1234 }; // fixed seed: the render is reproducible
+
+        for (double strumTime : strumTimes)
+        {
+            const bool downStroke = ((int) (strumTime * 2.0)) % 2 == 0;
+
+            for (int s = 0; s < numStrings; ++s)
+            {
+                // Low-to-high on a downstroke, reversed on an upstroke,
+                // with ~18ms between strings - roughly a real strum rate.
+                const int order = downStroke ? s : (numStrings - 1 - s);
+                const double startSeconds = strumTime + order * 0.018;
+                const int startSample = (int) (startSeconds * sampleRate);
+                if (startSample >= numSamples)
+                    continue;
+
+                const int period = juce::jmax (2, (int) std::round (sampleRate / stringHz[s]));
+                std::vector<float> delayLine ((size_t) period);
+                for (auto& v : delayLine)
+                    v = random.nextFloat() * 2.0f - 1.0f;
+
+                // Wound low strings ring longer than plain high ones.
+                const float decay = s < 3 ? 0.9985f : 0.9965f;
+                // Upper strings sit slightly back so the chord is not
+                // top-heavy once six of them overlap.
+                const float level = (s < 3 ? 0.20f : 0.15f) * (downStroke ? 1.0f : 0.85f);
+
+                int index = 0;
+                float previous = 0.0f;
+                for (int n = startSample; n < numSamples; ++n)
+                {
+                    const float current = delayLine[(size_t) index];
+                    const float filtered = 0.5f * (current + previous) * decay;
+                    delayLine[(size_t) index] = filtered;
+                    previous = current;
+                    index = (index + 1) % period;
+
+                    const float sample = current * level;
+                    l[n] += sample;
+                    r[n] += sample;
+
+                    // Stop once this string has decayed out of the mix,
+                    // rather than burning cycles on inaudible tails.
+                    if (n > startSample + (int) sampleRate * 4 && std::abs (current) < 1.0e-5f)
+                        break;
+                }
+            }
+        }
+
+        // Gentle fade-out only; the attacks must stay intact.
+        const int fadeOutSamples = (int) (0.5 * sampleRate);
+        for (int n = numSamples - fadeOutSamples; n < numSamples; ++n)
+        {
+            const float env = (float) (numSamples - n) / (float) fadeOutSamples;
+            l[n] *= env;
+            r[n] *= env;
+        }
+    }
+
     void writeWav (const juce::File& file, const juce::AudioBuffer<float>& buffer, double sampleRate)
     {
         file.deleteFile();
@@ -188,10 +295,18 @@ int main (int argc, char** argv)
     constexpr double sampleRate = 48000.0;
 
     // presets[1] = "パッドを回す" (rotate a pad)
-    renderPair (outputDir, "pad_rotate", fillPad, dnaorbit::presets::presets[1], sampleRate, 8.0);
+    // Durations are set from each preset's own revolution time, not picked
+    // round: at 0.18Hz one orbit takes 5.6s, so an 8s clip only ever showed
+    // 1.4 turns and the earlier vocal clip (6s at 0.13Hz) did not even
+    // complete one. Roughly two full revolutions is the minimum for the
+    // motion to read as motion rather than as a fixed off-centre image.
+    renderPair (outputDir, "pad_rotate", fillPad, dnaorbit::presets::presets[1], sampleRate, 12.0);
 
-    // presets[0] = "ボーカルを広げる" (widen a vocal)
-    renderPair (outputDir, "vocal_widen", fillVocalish, dnaorbit::presets::presets[0], sampleRate, 6.0);
+    // presets[0] = "ボーカルを広げる" (widen a vocal), 0.13Hz -> 7.7s/rev
+    renderPair (outputDir, "vocal_widen", fillVocalish, dnaorbit::presets::presets[0], sampleRate, 16.0);
+
+    // presets[2] = "ギターに揺らぎ" (add movement to a guitar), 0.11Hz -> 9.1s/rev
+    renderPair (outputDir, "guitar_sway", fillGuitar, dnaorbit::presets::presets[2], sampleRate, 18.0);
 
     std::printf ("Done. Files written to: %s\n", outputDir.getFullPathName().toRawUTF8());
     return 0;
